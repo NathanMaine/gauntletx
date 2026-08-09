@@ -1,0 +1,15 @@
+.git
+.gitignore
+.env
+.env.example
+docs/
+__pycache__/
+.DS_Store
+._*
+*.bak*
+Dockerfile
+docker-compose.yml
+.dockerignore
+test_smoke.sh
+README.md
+LICENSE

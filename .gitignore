@@ -1,0 +1,12 @@
+.env
+__pycache__/
+.DS_Store
+
+# Local-only working files — never published.
+# The internal status/plan/report docs and the launcher that points at the
+# LAN endpoint live here on the author's machine; the public repo ships the
+# safe localhost default instead.
+docs/STATUS.md
+docs/plan.md
+docs/team-report-*.md
+local.sh

@@ -1,0 +1,42 @@
+# gauntletx — Gauntlet Loop prompt generator, containerized.
+#
+#   docker compose up -d                    # start (or switch to the image tag below)
+#   curl -s localhost:7332/api/version      # confirm what is running
+#
+# Update:  build the new tag, bump `image:` below, `docker compose up -d`.
+# Rollback: point `image:` back at the previous tag, `docker compose up -d`.
+#
+# EXACTLY ONE autostart mechanism may hold port 7332. If a systemd unit or a
+# forgotten nohup copy of gauntletx is running on this box, stop and disable
+# it before bringing this up — two owners of one port is how "it works until
+# the next reboot" happens.
+
+services:
+  gauntletx:
+    image: gauntletx:0.2.4
+    build:
+      context: .
+      args:
+        VERSION: "0.2.4"
+    container_name: gauntletx
+    ports:
+      - "7332:7332"
+    # Endpoint and sampling knobs enter as environment variables only — the
+    # file itself never lands in the image or the container's filesystem.
+    # Compose refuses to start if the file is missing: `cp .env.example .env`
+    # on first deploy (an empty .env is valid — every var has a default).
+    env_file:
+      - .env
+    # No volumes, on purpose: gauntletx reads no projects and writes nothing.
+    # Everything it needs is in the image; everything it says goes over HTTP.
+    restart: unless-stopped
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "python3", "-c",
+             "import urllib.request;urllib.request.urlopen('http://127.0.0.1:7332/api/version',timeout=5)"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
