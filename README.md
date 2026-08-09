@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/gauntletx-banner.jpeg" alt="Run the prompt until the weak parts fall off" width="100%">
+</p>
+
 <h1 align="center">🥊 gauntletx</h1>
 
 <p align="center">
