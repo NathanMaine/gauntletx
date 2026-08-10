@@ -154,6 +154,22 @@ failures feed that model's profile defaults (which worked example it needs back,
 length line, etc.). Every check above corresponds to a failure KAT actually exhibited;
 none is hypothetical.
 
+## Decision 2026-08-10 — endpoint override is allowed
+
+The open question was whether a per-request endpoint URL constitutes an SSRF hole.
+
+**Resolved: allow it.** gauntletx is a LAN tool run on a network you control, not a
+hardened public endpoint — see [threat-model.md](threat-model.md). Under that posture,
+letting the browser point the server at another box on your own LAN is the feature, not
+the vulnerability; having to edit a `.env` and restart a container to switch models is the
+thing the config page exists to remove.
+
+The scheme is still validated (`http`/`https` only) so a typo fails cleanly. Numeric
+overrides are range-checked. Nothing is written server-side.
+
+What this rules out is equally explicit: gauntletx is not to be placed on the public
+internet or an untrusted network. The threat model lists what would have to be built first.
+
 ## Open questions for review
 
 1. Sequencing: config page before or after the NAS deploy? (Suggested: after.)

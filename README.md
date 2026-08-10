@@ -543,6 +543,16 @@ Stated plainly, because a tool that hides these is harder to trust:
 
 MIT — see [LICENSE](LICENSE).
 
+## Scope — a LAN tool
+
+gauntletx is meant to run on a network you control: a laptop, a home server, a NAS behind
+your own router. It has no authentication, no TLS and no rate limiting, and it does not
+pretend to. The default bind is `127.0.0.1`; exposing it further is a deliberate act, and
+"who can reach this port" is then the whole access control story.
+
+[docs/threat-model.md](docs/threat-model.md) states the posture and what is deliberately
+absent, so security decisions in the code are made against something written down.
+
 ## Issue log
 
 Every defect found and fixed is logged as a GitHub issue with its symptom, root cause and
