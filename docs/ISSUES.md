@@ -18,6 +18,7 @@ reasoning is worth more than the fix.
 | [#10](https://github.com/NathanMaine/gauntletx/issues/10) | Config page: set the prompting model from the UI, not just env vars | 0.3.0 |
 | [#11](https://github.com/NathanMaine/gauntletx/issues/11) | Explicit model override silently ignored by the 404 retry path | 0.3.0 |
 | [#12](https://github.com/NathanMaine/gauntletx/issues/12) | Connection errors named the default URL, not the overridden one | 0.3.0 |
+| [#13](https://github.com/NathanMaine/gauntletx/issues/13) | Prompt told agents to fan out sub-agents with no fallback when the harness has none | 0.3.1 |
 
 ## Long-form write-ups
 
@@ -32,13 +33,17 @@ reasoning is worth more than the fix.
 
 **Silent wrong answers are the expensive ones.** #1, #3 and #11 all produced confident,
 successful-looking output that was wrong: a metric with no information, a prompt for the
-wrong harness, a generation from a model you did not ask for. None raised an error. None
-would have been caught by reading the diff.
+wrong harness, a generation from a model you did not ask for. None raised an error.
 
-**Fixes introduce defects.** #2, #7 and #8 were all created while fixing something else,
-and #11 and #12 were created by the feature in #10. Every change here is now gated behind
-the self-test button for that reason.
+**Fixes introduce defects.** #2, #7 and #8 were created while fixing something else, and
+#11 and #12 were created by the feature in #10. Every change is now gated behind the
+self-test button for that reason.
 
-**Test the feature, do not read it.** #11 and #12 were both found by exercising the new
-config overrides with deliberately bad input — a model that does not exist, a port that
-is closed — rather than by reviewing the patch.
+**Test the feature, do not read it.** #11 and #12 were found by exercising the config
+overrides with a model that does not exist and a port that is closed. #13's first fix was
+a SYSTEM_PROMPT sentence that the model silently dropped — caught by generating a prompt
+and grepping it.
+
+**Advice competes for budget; a contract does not.** #1, #2 and #13 each ended with the
+fix moving out of SYSTEM_PROMPT and into a deterministic append the model never sees.
+That is now the default answer for anything that must not be negotiable.
