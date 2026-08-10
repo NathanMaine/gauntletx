@@ -3,6 +3,50 @@
 Notable changes, newest first. The image tag carries the version, so what
 `/api/version` reports is what this file explains.
 
+## 0.2.5 — 2026-08-09
+
+Twelfth harness target: **opencode**. It has primary agents and sub-agents it
+can delegate to, but no `/loop` and no ultracode, so it joins the Codex /
+Gemini CLI closer family ("Use sub-agents heavily and keep iterating
+continuously."). The Agentic CLIs group is now four.
+
+The distinguishing property is that **opencode's quality is not opencode's** —
+it is whichever provider the user has configured behind it. The prompt is told
+never to assume a frontier model's headroom, and the UI note says so plainly,
+including the failure mode that matters most for a Gauntlet Loop: a text-only
+model cannot blind-compare screenshots and will fall back to reading its own
+source and calling it good.
+
+### Added
+
+- `opencode` across every layer: HARNESSES, SYSTEM_PROMPT closer family,
+  NOTES harness families, DRAFT_PROMPT enum + nicknames ("open code"), both UI
+  selects, JS whitelist, CLI help, README.
+- A dedicated per-target hnote for `opencode` — the first note keyed to an
+  exact harness rather than a suffix family, covering the provider-quality
+  caveat and the vision requirement for visual critics.
+- `test_units.py`: 8 new cases (75/75 total), including three regression pins
+  that a bare "code" still resolves to `Codex`.
+
+### Fixed
+
+- `coerce_harness("opencode")` silently returned `Claude Code`, so anyone who
+  typed it got the wrong closer and a prompt citing `/loop` and ultracode that
+  opencode does not have. Roster order matters here: `opencode` sits *after*
+  `Codex` because the matcher walks `_HARNESS_KEYS` in order with a two-way
+  prefix test, and a bare "code" must keep landing on `Codex`.
+
+### Docs
+
+- `docs/visual-gauntlet-loop.md` — how the loop produces AAA visuals, built on
+  `mshumer/Claude-of-Duty`. The load-bearing finding: the critic must inspect
+  real pixels via a deterministic capture harness, or "check it visually"
+  silently becomes an agent reading source.
+- `docs/adversarial-review-2026-08-09.md` — review of v0.2.4 proposing three
+  changes (require the inspection harness; a held-out check on machine-checkable
+  bars; a `Challenge` work type for attempt/score loops). Proposal only; no
+  change was made to `SYSTEM_PROMPT`.
+
 ## 0.2.4 — 2026-08-08
 
 Eleventh harness target: **Qwen 3.8 Max (API)** — the Token-Plan flagship

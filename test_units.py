@@ -18,7 +18,7 @@ from gauntletx import (HARNESSES, STATUS_CONTRACT, apply_status_contract,
 
 # Sanity: the roster the cases coerce onto, in UI <optgroup> order.
 assert HARNESSES == (
-    "Claude Code", "Codex", "Gemini CLI",
+    "Claude Code", "Codex", "Gemini CLI", "opencode",
     "Qwen3 Coder Next (local)", "Qwen 3.8 (local)", "DeepSeek V4 Flash (local)",
     "Qwen 3.8 Max (API)",
     "Claude (web)", "ChatGPT (web)", "Google Gemini (web)", "Grok (web)",
@@ -108,6 +108,22 @@ API_CASES = [
 ]
 assert len(API_CASES) == 8, "api case count drifted: %d" % len(API_CASES)
 
+# 8 v0.2.5 cases: the opencode target. It sits AFTER Codex in the roster on
+# purpose — coerce_harness walks _HARNESS_KEYS in order with a two-way prefix
+# test, so a bare "code" has to keep landing on Codex exactly as it did before
+# opencode existed. The last three are regression pins for that.
+OPENCODE_CASES = [
+    ("opencode", "opencode"),
+    ("OpenCode", "opencode"),
+    ("  opencode  ", "opencode"),
+    ("open code", "opencode"),
+    ("opencode cli", "opencode"),
+    ("code", "Codex"),           # regression pin — must NOT become opencode
+    ("codex", "Codex"),          # regression pin
+    ("claude code", "Claude Code"),  # regression pin
+]
+assert len(OPENCODE_CASES) == 8, "opencode case count drifted: %d" % len(OPENCODE_CASES)
+
 # 12 v0.2.3 cases: apply_status_contract — flag × harness family, plus the
 # nothing-to-append-to guards. The append is deterministic (the fixed
 # STATUS_CONTRACT paragraph, never the model), so equality checks are exact.
@@ -143,7 +159,8 @@ def main():
     failures = []
     total = 0
     for label, cases in (("v0.2.1", V021_CASES), ("0.2.2-alias", ALIAS_CASES),
-                         ("0.2.4-api", API_CASES)):
+                         ("0.2.4-api", API_CASES),
+                         ("0.2.5-opencode", OPENCODE_CASES)):
         for value, want in cases:
             total += 1
             got = coerce_harness(value)
