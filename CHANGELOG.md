@@ -3,6 +3,18 @@
 Notable changes, newest first. The image tag carries the version, so what
 `/api/version` reports is what this file explains.
 
+## 0.2.12 — 2026-08-10
+
+Packaging fix for 0.2.11. The Dockerfile copied only `gauntletx.py`,
+`gauntletx_version.py` and `VERSION`, so the container had no test suites and
+`/api/selftest` reported them `missing` — 3/5 on the NAS deployment while the
+same commit passed 5/5 from a checkout. The self-test was the one feature that
+had to work everywhere and it worked only where it was least needed.
+
+`test_units.py` and `test_logic.py` now ship in the image. Stdlib-only, a few KB,
+no runtime cost. Found by running the endpoint against the NAS rather than
+assuming a green local run transferred.
+
 ## 0.2.11 — 2026-08-10
 
 **A self-test you can run before spending a generation.** New `Run self-test`

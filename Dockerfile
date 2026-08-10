@@ -21,7 +21,9 @@ WORKDIR /app
 
 # The whole app: the core file (server + CLI + embedded UI), the version
 # shim, and the version itself.
-COPY gauntletx.py gauntletx_version.py VERSION ./
+# The test suites ship with the image so /api/selftest works in the container,
+# not just from a checkout. Stdlib-only, a few KB, no runtime cost.
+COPY gauntletx.py gauntletx_version.py VERSION test_units.py test_logic.py ./
 
 # read_only rootfs in compose means no bytecode cache writes either.
 ENV PYTHONDONTWRITEBYTECODE=1 \
