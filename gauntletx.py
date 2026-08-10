@@ -860,7 +860,11 @@ BASELINE_CONTRACT = (
     "incomplete and is not finished. Treat a model that does not beat the "
     "constant predictor as a failed round — that round is spent finding out "
     "why the metric is degenerate, not improving the model. If either split "
-    "collapses to a single label, stop and fix the labelling first.")
+    "collapses to a single label, stop and fix the labelling first. Sanity-check the "
+    "baselines before trusting any score: a constant predictor that returns zero on a "
+    "multi-class evaluation set is a bug in your harness, not a good result, and it must "
+    "never score below the least frequent class's share. Validate it against a case whose "
+    "answer you have worked out by hand.")
 
 
 def apply_baseline_contract(prompt, flag):

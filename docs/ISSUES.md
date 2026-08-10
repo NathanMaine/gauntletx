@@ -1,7 +1,7 @@
 # Issue log
 
-Every defect found and fixed. Each links to a GitHub issue carrying the symptom, the root
-cause and the resolution. Two have long-form write-ups in this directory.
+Every defect found and fixed. Each links to a GitHub issue with the symptom, root cause and
+resolution. Three have long-form write-ups in this directory.
 
 | # | Issue | Fixed in |
 |---|---|---|
@@ -19,6 +19,7 @@ cause and the resolution. Two have long-form write-ups in this directory.
 | [#12](https://github.com/NathanMaine/gauntletx/issues/12) | Connection errors named the default URL, not the overridden one | 0.3.0 |
 | [#13](https://github.com/NathanMaine/gauntletx/issues/13) | Prompt told agents to fan out sub-agents with no fallback when the harness has none | 0.3.1 |
 | [#14](https://github.com/NathanMaine/gauntletx/issues/14) | Autonomy was assumed, not instructed — one harness stopped for approval, another looped without progress | 0.3.5 |
+| [#15](https://github.com/NathanMaine/gauntletx/issues/15) | BASELINE_CONTRACT was satisfied by a baseline that was computed wrong | 0.3.6 |
 
 ## Long-form write-ups
 
@@ -26,11 +27,13 @@ cause and the resolution. Two have long-form write-ups in this directory.
   accuracy that meant nothing.
 - [issue-002-streaming-result-loss.md](issue-002-streaming-result-loss.md) — a completed
   generation rendered nothing, through valid-but-unreachable JavaScript.
+- [issue-003-broken-guard.md](issue-003-broken-guard.md) — the guard was present, called,
+  reported, and wrong. Worse than absent, because it manufactured confidence.
 
 ## Patterns worth keeping visible
 
-**Silent wrong answers are the expensive ones.** #1, #3 and #11 all produced confident,
-successful-looking output that was wrong. None raised an error.
+**Silent wrong answers are the expensive ones.** #1, #3, #11 and #15 all produced
+confident, successful-looking output that was wrong. None raised an error.
 
 **Fixes introduce defects.** #2, #7 and #8 were created while fixing something else; #11
 and #12 by the feature in #10.
@@ -41,9 +44,11 @@ SYSTEM_PROMPT sentence the model silently dropped, caught by generating and grep
 
 **Advice competes for budget; a contract does not.** #1, #2, #13 and #14 each ended with
 the fix moving out of SYSTEM_PROMPT into a deterministic append the model never sees.
-That is now the default for anything non-negotiable.
 
-**The method assumed the harness.** #13 and #14 are both cases where the Gauntlet Loop
-took a property for granted — callable sub-agents, uninterrupted autonomy — that holds on
-Claude Code and not on a flash-tier IDE agent or a small local model. Generalising a
-method to thirteen harnesses means writing down what its author never had to.
+**A contract must assert a property of the value, not just its presence.** #15 is the
+counterexample to the rule above: the append was there, honoured, and useless, because
+"print the baseline" is satisfied by printing a wrong baseline.
+
+**The method assumed the harness.** #13 and #14 are cases where the Gauntlet Loop took for
+granted something true of Claude Code and false of a flash-tier IDE agent or a small local
+model. Generalising to thirteen harnesses means writing down what its author never had to.

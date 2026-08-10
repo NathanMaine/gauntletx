@@ -554,6 +554,69 @@ settings travel as per-request overrides and the server range-checks each one. C
 therefore follows the browser, so a phone and a laptop can hold different settings. Blank
 means "use the server default", and `GET /api/config` shows what those are.
 
+## Expectations — what changes on a smaller model
+
+**The method was validated on the best tooling available.** Matt Shumer built
+*Claude of Duty* with Claude Code, Opus 5 and `ultracode`: one prompt, many hours,
+~55,000 lines, and in his words *"I did not sit there steering it, at all."* His page states
+the assumption directly — **"the architecture assumes the agent won't get blocked."**
+
+That assumption is a property of the harness and model, not of the prompt. gauntletx
+generalises the method to thirteen targets, several of which are small local models. Here is
+what actually happened running the same brief across three of them:
+
+| Run | Model | Built | Reported | True? |
+|---|---|---|---|---|
+| 1 | KAT-Coder 35B-A3B, local (~3B active) | 5,526 lines: MLP with hand-written backprop, full transformer, training pipeline, 39 passing tests | **100% accuracy** | **No** — a string-comparison bug collapsed every label to one class; a constant predictor scores 100% on that |
+| 2 | same | classifier, training loop, eval harness, corpus generator | **"beat the constant predictor (0.0)"** | **No** — the baseline function took a *count* instead of a *label*, so the bar was always 0.0 and beating it was vacuous |
+| 3 | Gemini flash-tier via Antigravity | pure-Python tokenizer, transformer, training loop, Jaccard eval, 220 KB researched corpus | **0.10%, round failed** | **Yes** — reproduced at 0.19% on a holdout it had never seen |
+
+### What degrades first, and it is not the building
+
+All three models **built competently**. Real transformers, real backprop, real training
+loops, in pure Python, from one prompt. That part scales down further than you would guess.
+
+What degrades is **self-assessment**. Every failure above was the model being unable to tell
+a working measurement from a broken one — and both bugs were in *evaluation* code, where a
+mistake returns a plausible number instead of crashing. A crash gets fixed, because the loop
+sees it. A wrong number does not, because the number *is* the loop's only feedback.
+
+Autonomy degrades too, in both directions: one harness stopped four times for approval it
+did not need, another never stopped but looped on the same failing command ten times.
+**"Did not stop" and "made progress" are not the same property.**
+
+### Why the guards are worth more on a small model, not less
+
+This is the useful finding. A frontier model largely supplies its own rigour — it notices a
+degenerate metric, picks a sensible bar, keeps going when blocked. A smaller model builds
+almost as well and judges far worse.
+
+So the deterministic contracts are not overhead on the way to frontier quality. They are
+**a substitute for the specific capability that is missing**:
+
+| Contract | Supplies |
+|---|---|
+| `BASELINE_CONTRACT` | the scepticism to distrust its own metric |
+| `METHOD_CONTRACT` | the judgement to decide, keep moving, and not spin |
+| status-page contract | the discipline to report failures as they happen |
+
+Run 3 is the evidence: a **flash-tier** model, given those guards, produced the only result
+of the three that survived independent checking. It did that by correctly reporting **0.10%
+and failing its own round** — which is worth vastly more than run 1's confident 100%.
+
+### What to expect
+
+- **Expect a lot of code from one prompt**, even locally. That part works.
+- **Do not trust the first number.** Three of four runs reported a score that did not survive
+  checking. Treat an early high score as a bug report.
+- **Expect low honest numbers.** No run here has yet produced a *good* domain model — the
+  best verified score is 0.10% on free-text answering. The achievement so far is a
+  **measuring instrument you can trust**, which is what makes the next round worth running.
+- **Budget supervision.** The unattended promise holds on frontier tooling. On a small model,
+  plan to check the artifacts, not the summary.
+- **Verify on data the builder never saw.** Every claim above was settled that way, and it is
+  the only check that cannot be gamed.
+
 ## Scope — a LAN tool
 
 gauntletx is meant to run on a network you control: a laptop, a home server, a NAS behind

@@ -3,6 +3,46 @@
 Notable changes, newest first. The image tag carries the version, so what
 `/api/version` reports is what this file explains.
 
+## 0.3.6 — 2026-08-10
+
+**A guard that reports is not a guard that checks.**
+
+A run satisfied `BASELINE_CONTRACT` to the letter and produced a meaningless
+result anyway. It printed a model score, a constant predictor, a random predictor
+and an overlap count — everything the contract asked for — and reported *"all
+results beat the constant predictor baseline."*
+
+Its constant predictor was **0.0**, from
+`Counter(labels).most_common(1)[0][1]` — the **count**, not the label — compared
+against labels 0–4. Nothing can equal 13, so the baseline was always zero and
+"beat the baseline" was vacuous. The real constant predictor on that holdout is
+**0.310**, which turns typical rounds of 0.33–0.45 from "comfortably ahead" into
+"marginally above chance".
+
+This is worse than having no guard. An absent guard leaves an obvious hole; a
+broken one **manufactures confidence**, and the report was more persuasive
+precisely because it cited a baseline.
+
+### Root cause was in the contract, not the code
+
+`BASELINE_CONTRACT` was worded as an artifact property — deliberately, since
+behavioural clauses get dropped (issue 001). But it specified the **shape** of the
+output and no property of its **value**. "Print X" is satisfiable by printing a
+wrong X.
+
+### Changed
+
+`BASELINE_CONTRACT` now asserts two checkable properties of the value:
+
+- a constant predictor returning zero on a multi-class set is a bug, not a result,
+  and must never score below the least frequent class's share;
+- it must be validated against a case whose answer was worked out by hand.
+
+Both are verifiable by the agent without the operator.
+
+Full write-up: `docs/issue-003-broken-guard.md`. `test_logic.py` → **134 checks**;
+225 across both suites.
+
 ## 0.3.5 — 2026-08-10
 
 **Autonomy, stated rather than assumed.**

@@ -205,6 +205,19 @@ check_true("autonomy: ask rather than substitute",
 check_true("autonomy: stall detection",
            "treat that as a stall" in G.METHOD_CONTRACT)
 
+# --------------------------------------------- baseline contract self-check
+# Issue 003: the contract said "print the constant predictor" and a run printed a
+# constant predictor of 0.0, produced by taking Counter.most_common(1)[0][1] (the
+# count) instead of [0] (the label). "Beat the baseline" became vacuous. An
+# artifact requirement is only as strong as the properties it asserts about the
+# artifact, so the contract now asserts a property of the VALUE.
+check_true("baseline contract rejects a zero constant predictor",
+           "returns zero on a multi-class evaluation set is a bug" in G.BASELINE_CONTRACT)
+check_true("baseline contract sets a floor",
+           "never score below the least frequent class" in G.BASELINE_CONTRACT)
+check_true("baseline contract demands hand validation",
+           "worked out by hand" in G.BASELINE_CONTRACT)
+
 # ------------------------------------------------------ sanitize_overrides
 def _ok(raw):
     ov, err = G.sanitize_overrides(raw)
