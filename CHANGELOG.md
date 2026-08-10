@@ -3,6 +3,46 @@
 Notable changes, newest first. The image tag carries the version, so what
 `/api/version` reports is what this file explains.
 
+## 0.3.0 — 2026-08-10
+
+**Config page.** A ⚙ panel at the bottom of the first tab sets which model
+writes your prompts — endpoint URL, model (picked from what the endpoint
+actually reports), temperature, max tokens, timeout — without editing a `.env`
+or restarting anything.
+
+Built to the storage design in `docs/config-design-v030.md`: the container runs
+read-only, so **nothing is persisted server-side**. Config lives in browser
+localStorage and travels as an `overrides` object on each POST; the server
+range-checks every field. Accepted consequence, stated in the design: config
+follows the browser, so a phone and a laptop can differ.
+
+`GET /api/config` reports server defaults, the models the endpoint is serving,
+whether `GAUNTLETX_MODEL` pins one, and whether an API key is set — never the
+key itself.
+
+The endpoint URL is overridable. On a public service that would be SSRF; on a
+LAN tool it is the point — see `docs/threat-model.md`, and issue #10 for the
+decision. Scheme is still validated so a typo fails cleanly.
+
+### Fixed — two bugs found while testing this, not by reading it
+
+- **An explicit model override was silently ignored.** On a 404 the retry path
+  called `resolve_model(force=True)` and overwrote it, so asking for a model the
+  server does not serve produced a *successful* generation from a different
+  model. Now an explicit override fails loudly, exactly as an explicit
+  `GAUNTLETX_MODEL` pin already did. Same silent-wrong-answer class as #1 and #3.
+- **Two error messages named `VLLM_URL` instead of the URL actually called**, so
+  overriding the endpoint produced "cannot reach vLLM at <the default>" while it
+  had really tried the override — precisely the treasure hunt the function's own
+  docstring says it exists to prevent.
+
+### Added
+
+- `sanitize_overrides()` and `config_info()`, both pure and both covered.
+- `test_logic.py` grows to **114 checks** (was 76): every override branch,
+  including rejected schemes, out-of-range numbers and overlong values, plus the
+  `config_info` contract the UI depends on. **205 checks** across both suites.
+
 ## 0.2.13 — 2026-08-10
 
 **The self-test now checks the model, not just the code**, and the button is on

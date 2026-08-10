@@ -197,8 +197,8 @@ Three changes, written to be pasted. Anchors are exact as of v0.2.4.
 
 A run of this exact shape (opencode → KAT-Coder on the Spark) produced **100%
 accuracy against an 82% target** and the number was meaningless. Full write-up
-and reproducible evidence are held locally at
-`~/opencode_test_casestudy/` (`verify.py` re-derives every finding).
+and reproducible evidence are held privately, outside this repo — the findings below
+are the portable part.
 
 What happened, in one line: a three-line `label_encode` compared full domain
 strings (`'SAFe 6.0'`) against short class names (`'SAFe'`), never matched, and
@@ -220,10 +220,10 @@ of both splits. One line of output would have caught this in round one.
 ### Diff 4 (new) — the bar must not be authored by the builder
 
 The run created its own holdout inside the project, its own labels, its own
-metric and its own target. `/Users/nmaine/opencode_test_holdout/` — specified in
-the prompt, and protected by an opencode permission that **auto-rejects** reads
-from outside the project (verified) — stayed empty. Enforcement pointed at a
-directory nothing was ever put in.
+metric and its own target. The holdout directory named in the prompt — protected by an
+opencode permission that **auto-rejects** reads from outside the project (verified) —
+stayed empty, because the builder wrote its own holdout inside the project instead.
+Enforcement pointed at a directory nothing was ever put in.
 
 ```diff
 +- The builder must not author the bar. If the same agent creates the evaluation

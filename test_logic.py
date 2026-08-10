@@ -22,6 +22,7 @@ Run:  python3 test_logic.py        (exit 0 and "N/N" on success)
       python3 test_logic.py --cov  (adds a stdlib-trace line-coverage report)
 """
 import io
+import json
 import sys
 
 import gauntletx as G
@@ -162,6 +163,51 @@ check("baseline raw door off", G._baseline_contract_raw(RAW, False), RAW)
 check("baseline raw door unparseable", G._baseline_contract_raw("no headings", True), "no headings")
 both = G._baseline_contract_raw(G._status_contract_raw(RAW, "Codex", True), True)
 check_true("both doors, status first", both.index(G.STATUS_CONTRACT) < both.index(G.BASELINE_CONTRACT))
+
+# ------------------------------------------------------ sanitize_overrides
+def _ok(raw):
+    ov, err = G.sanitize_overrides(raw)
+    return ov if err is None else ("ERR: " + err)
+
+
+check("overrides none", _ok(None), {})
+check("overrides empty", _ok({}), {})
+check("overrides ignores blanks", _ok({"model": "", "vllm_url": "", "temperature": ""}), {})
+check("overrides model", _ok({"model": "m1"}), {"model": "m1"})
+check("overrides trims model", _ok({"model": "  m1  "}), {"model": "m1"})
+check("overrides url http", _ok({"vllm_url": "http://x/v1"}), {"vllm_url": "http://x/v1"})
+check("overrides url https", _ok({"vllm_url": "https://x/v1"}), {"vllm_url": "https://x/v1"})
+check_true("overrides rejects file scheme", str(_ok({"vllm_url": "file:///etc/passwd"})).startswith("ERR"))
+check_true("overrides rejects gopher", str(_ok({"vllm_url": "gopher://x"})).startswith("ERR"))
+check_true("overrides rejects overlong url", str(_ok({"vllm_url": "http://" + "x" * 600})).startswith("ERR"))
+check_true("overrides rejects overlong model", str(_ok({"model": "x" * 300})).startswith("ERR"))
+check("overrides temperature", _ok({"temperature": 0.5}), {"temperature": 0.5})
+check("overrides temperature as string", _ok({"temperature": "1.5"}), {"temperature": 1.5})
+check_true("overrides temperature high", str(_ok({"temperature": 2.5})).startswith("ERR"))
+check_true("overrides temperature negative", str(_ok({"temperature": -1})).startswith("ERR"))
+check_true("overrides temperature garbage", str(_ok({"temperature": "hot"})).startswith("ERR"))
+check("overrides max_tokens", _ok({"max_tokens": 100}), {"max_tokens": 100})
+check_true("overrides max_tokens zero", str(_ok({"max_tokens": 0})).startswith("ERR"))
+check_true("overrides max_tokens huge", str(_ok({"max_tokens": 999999})).startswith("ERR"))
+check("overrides timeout", _ok({"timeout": 60}), {"timeout": 60})
+check_true("overrides timeout too small", str(_ok({"timeout": 1})).startswith("ERR"))
+check_true("overrides timeout too big", str(_ok({"timeout": 99999})).startswith("ERR"))
+check("overrides combined", _ok({"model": "m", "temperature": 0.2, "max_tokens": 10, "timeout": 30}),
+      {"model": "m", "temperature": 0.2, "max_tokens": 10, "timeout": 30})
+check("overrides non-dict ignored", _ok("nope"), {})
+
+# ---------------------------------------------------------- config_info
+# Shape only — the served-model list depends on a live endpoint, so assert the
+# contract the UI relies on rather than the contents.
+ci = G.config_info()
+for key in ("version", "defaults", "served_models", "limits",
+            "model_pinned_by_env", "api_key_set", "discovery_error"):
+    check_true("config_info has " + key, key in ci)
+for key in ("vllm_url", "model", "temperature", "max_tokens", "timeout"):
+    check_true("config_info defaults has " + key, key in ci["defaults"])
+check_true("config_info leaks no key value",
+           "api_key" not in json.dumps(ci).lower().replace("api_key_set", ""))
+check_true("config_info served_models is a list", isinstance(ci["served_models"], list))
 
 # ----------------------------------------------------------- sse_events
 class _FakeResp:

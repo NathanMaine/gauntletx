@@ -543,6 +543,17 @@ Stated plainly, because a tool that hides these is harder to trust:
 
 MIT — see [LICENSE](LICENSE).
 
+### Config page
+
+A ⚙ panel at the bottom of the first tab picks the model that writes your prompts —
+endpoint, model, temperature, max tokens, timeout — with the model list populated from
+what your endpoint actually reports.
+
+Config is stored in **your browser**, not on the server: the container runs read-only, so
+settings travel as per-request overrides and the server range-checks each one. Config
+therefore follows the browser, so a phone and a laptop can hold different settings. Blank
+means "use the server default", and `GET /api/config` shows what those are.
+
 ## Scope — a LAN tool
 
 gauntletx is meant to run on a network you control: a laptop, a home server, a NAS behind

@@ -491,26 +491,103 @@ def validate_inputs(goal, references, constraints, boundaries):
     return None
 
 
-def open_vllm(user_msg, stream, system_prompt=SYSTEM_PROMPT):
+def sanitize_overrides(raw):
+    """Validate per-request model overrides. Returns (overrides, error).
+
+    Config is client-side by design — the container runs read-only, so nothing
+    is persisted server-side (see docs/config-design-v030.md). Everything the
+    browser sends is therefore untrusted input and is range-checked here.
+
+    The endpoint URL IS overridable. On a public service that would be SSRF; on
+    a LAN tool it is the feature — see docs/threat-model.md. The scheme is still
+    validated so a typo fails cleanly rather than interestingly."""
+    ov = {}
+    if not isinstance(raw, dict):
+        return ov, None
+
+    url = (raw.get("vllm_url") or "").strip()
+    if url:
+        if not url.startswith(("http://", "https://")):
+            return None, "vllm_url must start with http:// or https://"
+        if len(url) > 500:
+            return None, "vllm_url is too long"
+        ov["vllm_url"] = url
+
+    model = (raw.get("model") or "").strip()
+    if model:
+        if len(model) > 200:
+            return None, "model name is too long"
+        ov["model"] = model
+
+    for key, lo, hi, cast in (("temperature", 0.0, 2.0, float),
+                              ("max_tokens", 1, 200000, int),
+                              ("timeout", 5, 3600, int)):
+        if raw.get(key) in (None, ""):
+            continue
+        try:
+            val = cast(raw[key])
+        except (TypeError, ValueError):
+            return None, "{} must be a number".format(key)
+        if not (lo <= val <= hi):
+            return None, "{} must be between {} and {}".format(key, lo, hi)
+        ov[key] = val
+    return ov, None
+
+
+def config_info():
+    """Server defaults for the config page, plus what the endpoint reports.
+
+    The UI merges this with its own localStorage. Never includes a key value —
+    only whether one is set."""
+    served, err = [], None
+    try:
+        req = urllib.request.Request(models_url(), headers=_headers())
+        with urllib.request.urlopen(req, timeout=6) as r:
+            data = json.loads(r.read())
+        served = [m.get("id") for m in (data.get("data") or [])
+                  if isinstance(m, dict) and m.get("id")]
+    except Exception as e:  # noqa: BLE001 — the config page must render offline
+        err = "{}: {}".format(type(e).__name__, e)
+    return {"version": VERSION,
+            "defaults": {"vllm_url": VLLM_URL,
+                         "model": MODEL_ENV or _model_cache["id"] or "",
+                         "temperature": TEMPERATURE,
+                         "max_tokens": MAX_TOKENS,
+                         "timeout": TIMEOUT},
+            "model_pinned_by_env": bool(MODEL_ENV),
+            "api_key_set": bool(API_KEY),
+            "served_models": served,
+            "discovery_error": err,
+            "limits": {"temperature": [0.0, 2.0], "max_tokens": [1, 200000],
+                       "timeout": [5, 3600]}}
+
+
+def open_vllm(user_msg, stream, system_prompt=SYSTEM_PROMPT, ov=None):
     """Open the chat/completions call. Returns (response, None) — the caller
     owns closing it — or (None, error string). The error always names the URL
     it tried, because 'connection refused' without an address is a treasure
     hunt at 2am. system_prompt defaults to the generator; /api/draft passes
     DRAFT_PROMPT through the same plumbing."""
-    model, err = resolve_model()
-    if err:
-        return None, err
+    ov = ov or {}
+    url = ov.get("vllm_url") or VLLM_URL
+    if ov.get("model"):
+        model = ov["model"]
+    else:
+        model, err = resolve_model()
+        if err:
+            return None, err
     payload = {"model": model,
                "messages": [{"role": "system", "content": system_prompt},
                             {"role": "user", "content": user_msg}],
-               "temperature": TEMPERATURE,
-               "max_tokens": MAX_TOKENS,
+               "temperature": ov.get("temperature", TEMPERATURE),
+               "max_tokens": ov.get("max_tokens", MAX_TOKENS),
                "stream": bool(stream)}
+    timeout = ov.get("timeout", TIMEOUT)
     retried = False
     while True:
-        req = urllib.request.Request(VLLM_URL, json.dumps(payload).encode(), _headers())
+        req = urllib.request.Request(url, json.dumps(payload).encode(), _headers())
         try:
-            return urllib.request.urlopen(req, timeout=TIMEOUT), None
+            return urllib.request.urlopen(req, timeout=timeout), None
         except urllib.error.HTTPError as e:
             detail = ""
             try:
@@ -520,16 +597,16 @@ def open_vllm(user_msg, stream, system_prompt=SYSTEM_PROMPT):
             # vLLM serves one model at a time; a 404 usually means the box
             # swapped models since we cached the id. Re-discover once, then
             # give up honestly rather than looping.
-            if e.code == 404 and not MODEL_ENV and not retried:
+            if e.code == 404 and not MODEL_ENV and not ov.get("model") and not retried:
                 retried = True
                 model, rerr = resolve_model(force=True)
                 if model:
                     payload["model"] = model
                     continue
             return None, "vLLM at {} returned HTTP {}: {}".format(
-                VLLM_URL, e.code, detail or "no detail")
+                url, e.code, detail or "no detail")
         except (urllib.error.URLError, OSError) as e:
-            return None, "cannot reach vLLM at {}: {}".format(VLLM_URL, e)
+            return None, "cannot reach vLLM at {}: {}".format(url, e)
 
 
 def sse_events(resp):
@@ -798,10 +875,10 @@ def _status_contract_raw(raw, harness, flag):
     return raw[:s] + lead + apply_status_contract(core, harness, flag) + trail + raw[e:]
 
 
-def call_blocking(user_msg, system_prompt):
+def call_blocking(user_msg, system_prompt, ov=None):
     """One non-streamed round trip, shared by generate and draft. Returns
     (raw content, reasoning, None) or (None, None, error string)."""
-    resp, err = open_vllm(user_msg, stream=False, system_prompt=system_prompt)
+    resp, err = open_vllm(user_msg, stream=False, system_prompt=system_prompt, ov=ov)
     if err:
         return None, None, err
     try:
@@ -822,7 +899,7 @@ def call_blocking(user_msg, system_prompt):
 
 
 def generate_blocking(goal, mode, work_type, references, constraints, boundaries, harness,
-                      status_page=False, baseline_check=False):
+                      status_page=False, baseline_check=False, ov=None):
     """One non-streamed round trip. Returns (result dict, None) or (None, err).
     The dict always carries `raw`; the parsed fields are None when the model
     ignored the output format — the caller still gets everything it said.
@@ -834,12 +911,12 @@ def generate_blocking(goal, mode, work_type, references, constraints, boundaries
     ignored for (web) harnesses — a chat target can't write files."""
     user_msg = build_user_message(goal, mode, work_type, references,
                                   constraints, boundaries, harness)
-    raw, reasoning, err = call_blocking(user_msg, SYSTEM_PROMPT)
+    raw, reasoning, err = call_blocking(user_msg, SYSTEM_PROMPT, ov=ov)
     if err:
         return None, err
     raw, _fixed, lint = harden_output(raw, harness)
     if lint:
-        raw2, reasoning2, err2 = call_blocking(user_msg, SYSTEM_PROMPT)
+        raw2, reasoning2, err2 = call_blocking(user_msg, SYSTEM_PROMPT, ov=ov)
         if not err2:
             raw2, _fixed2, lint2 = harden_output(raw2, harness)
             if not lint2:
@@ -855,13 +932,13 @@ def generate_blocking(goal, mode, work_type, references, constraints, boundaries
     return out, None
 
 
-def draft_blocking(description):
+def draft_blocking(description, ov=None):
     """One /api/draft round trip: a one-shot description in, coerced form
     fields out. Returns (dict, None) or (None, err). Blocking only — the
     output is small. A reply that ignores the format is NOT an error: the
     dict carries `raw` with every field null and the UI falls back to showing
     the raw text, mirroring generate's raw fallback."""
-    raw, _reasoning, err = call_blocking(description.strip(), DRAFT_PROMPT)
+    raw, _reasoning, err = call_blocking(description.strip(), DRAFT_PROMPT, ov=ov)
     if err:
         return None, err
     s = parse_sections(raw, DRAFT_SECTION_RE)
@@ -1202,6 +1279,32 @@ footer a{color:var(--accent);text-decoration:none}
       <button id="dselftest" class="ghost">Run self-test</button>
       <span class="hint" id="dselftestout">Runs both unit suites and a served-JS check before you spend a run.</span>
     </div>
+    <details id="cfgbox">
+      <summary>&#9881; Config — which model writes your prompts</summary>
+      <p class="hint">Stored in this browser only; the server keeps nothing. Sent with each
+      request as an override. Blank means "use the server default". This is a LAN tool —
+      see the threat model before exposing it beyond your own network.</p>
+      <div class="row">
+        <div class="field"><label for="cfgurl">Endpoint URL</label>
+          <input id="cfgurl" placeholder="server default"></div>
+        <div class="field"><label for="cfgmodel">Model</label>
+          <select id="cfgmodel"><option value="">server default (auto-discover)</option></select></div>
+      </div>
+      <div class="row">
+        <div class="field"><label for="cfgtemp">Temperature</label>
+          <input id="cfgtemp" type="number" step="0.05" min="0" max="2" placeholder="default"></div>
+        <div class="field"><label for="cfgmax">Max tokens</label>
+          <input id="cfgmax" type="number" min="1" max="200000" placeholder="default"></div>
+        <div class="field"><label for="cfgtimeout">Timeout (s)</label>
+          <input id="cfgtimeout" type="number" min="5" max="3600" placeholder="default"></div>
+      </div>
+      <div class="row">
+        <button id="cfgsave" class="ghost">Save</button>
+        <button id="cfgclear" class="ghost">Reset to server defaults</button>
+        <button id="cfgrefresh" class="ghost">Reload model list</button>
+        <span class="hint" id="cfgout"></span>
+      </div>
+    </details>
     <div class="row">
       <button id="draftgo">Draft the form &#8594;</button>
       <span class="hint" id="drafthint" hidden><span class="spin"></span> drafting&#8230;</span>
@@ -1436,7 +1539,8 @@ async function run(){
   const body={goal:goal,mode:vals.mode,work_type:vals.wtype,
     harness:vals.harness,references:vals.refs,
     constraints:vals.cons,boundaries:vals.bounds,
-    status_page:wantContract,baseline_check:wantBaseline,stream:true};
+    status_page:wantContract,baseline_check:wantBaseline,stream:true,
+    overrides:cfgOverrides()};
   try{
     const r=await fetch('/api/generate',{method:'POST',
       headers:{'Content-Type':'application/json'},
@@ -1586,6 +1690,74 @@ async function runSelfTest(){
   finally{btns.forEach(b=>b.disabled=false)}
 }
 ['selftest','dselftest'].forEach(i=>{const b=$(i);if(b)b.addEventListener('click',runSelfTest)});
+
+/* ---- Config: browser-local, sent per request -----------------------------
+   The container is read-only, so the server persists nothing (see
+   docs/config-design-v030.md). Config lives in localStorage and travels as an
+   `overrides` object on each POST; the server range-checks every field. A
+   consequence, accepted in the design: config follows the browser, so a phone
+   and a laptop can differ. */
+const CFG_KEY='gauntletx.config.v1';
+const CFG_FIELDS={cfgurl:'vllm_url',cfgmodel:'model',cfgtemp:'temperature',
+                  cfgmax:'max_tokens',cfgtimeout:'timeout'};
+function cfgRead(){
+  try{return JSON.parse(localStorage.getItem(CFG_KEY)||'{}')}catch(e){return {}}
+}
+function cfgOverrides(){
+  const c=cfgRead(),o={};
+  for(const k of Object.values(CFG_FIELDS)){
+    const v=c[k];
+    if(v!==undefined&&v!==null&&String(v).trim()!=='')o[k]=v;
+  }
+  return o;
+}
+function cfgToForm(){
+  const c=cfgRead();
+  for(const [id,key] of Object.entries(CFG_FIELDS)){
+    const e=$(id);if(e)e.value=(c[key]===undefined||c[key]===null)?'':c[key];
+  }
+}
+async function cfgLoadServer(){
+  try{
+    const r=await fetch('/api/config');const j=await r.json();
+    const sel=$('cfgmodel');if(!sel)return;
+    const cur=cfgRead().model||'';
+    sel.innerHTML='<option value="">server default (auto-discover)</option>';
+    (j.served_models||[]).forEach(m=>{
+      const o=document.createElement('option');o.value=m;o.textContent=m;sel.appendChild(o)});
+    if(cur&&!(j.served_models||[]).includes(cur)){
+      const o=document.createElement('option');o.value=cur;
+      o.textContent=cur+' (not currently served)';sel.appendChild(o)}
+    sel.value=cur;
+    const d=j.defaults||{};
+    $('cfgurl').placeholder=d.vllm_url||'server default';
+    $('cfgtemp').placeholder=d.temperature;
+    $('cfgmax').placeholder=d.max_tokens;
+    $('cfgtimeout').placeholder=d.timeout;
+    const bits=[];
+    if(j.discovery_error)bits.push('endpoint unreachable — '+j.discovery_error);
+    else bits.push((j.served_models||[]).length+' model(s) served');
+    if(j.model_pinned_by_env)bits.push('server pins GAUNTLETX_MODEL');
+    $('cfgout').textContent=bits.join(' · ');
+  }catch(e){$('cfgout').textContent='could not load server config: '+e.message}
+}
+if($('cfgsave')){
+  $('cfgsave').addEventListener('click',()=>{
+    const c={};
+    for(const [id,key] of Object.entries(CFG_FIELDS)){
+      const v=($(id).value||'').trim();if(v!=='')c[key]=v}
+    localStorage.setItem(CFG_KEY,JSON.stringify(c));
+    const n=Object.keys(c).length;
+    $('cfgout').textContent=n?('saved — '+n+' override(s) active in this browser')
+                             :'saved — using server defaults';
+  });
+  $('cfgclear').addEventListener('click',()=>{
+    localStorage.removeItem(CFG_KEY);cfgToForm();
+    $('cfgout').textContent='cleared — using server defaults';cfgLoadServer();
+  });
+  $('cfgrefresh').addEventListener('click',cfgLoadServer);
+  cfgToForm();cfgLoadServer();
+}
 $('baseline').addEventListener('change',()=>{baselineTouched=true;$('dbaseline').checked=$('baseline').checked});
 $('dbaseline').addEventListener('change',()=>{baselineTouched=true;$('baseline').checked=$('dbaseline').checked});
 $('statuspage').addEventListener('change',()=>{$('dstatuspage').checked=$('statuspage').checked});
@@ -1670,7 +1842,7 @@ async function runDraft(){
   try{
     const r=await fetch('/api/draft',{method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({description:payload})});
+      body:JSON.stringify({description:payload,overrides:cfgOverrides()})});
     let j=null;try{j=await r.json()}catch(e){}
     if(!r.ok||!j){
       showError((j&&j.error)||('HTTP '+r.status+' from /api/draft'));return}
@@ -1765,6 +1937,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if route == "/api/selftest":
             self._json(run_selftest())
             return
+        if route == "/api/config":
+            self._json(config_info())
+            return
         if route in ("/", "/index.html"):
             # __STATUS_CONTRACT__ is templated in like __VERSION__ (as a JSON
             # string literal) so the UI's client-side append and the server's
@@ -1844,7 +2019,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._json({"error": "description is too long ({} chars; max {})".format(
                 len(description), DESC_MAX)}, 400)
             return
-        result, err = draft_blocking(description)
+        ov, ov_err = sanitize_overrides(p.get("overrides"))
+        if ov_err:
+            self._json({"error": ov_err}, 400)
+            return
+        result, err = draft_blocking(description, ov=ov)
         if err:
             # Same 502 semantics as /api/generate: the message names the
             # vLLM URL it tried.
@@ -1878,6 +2057,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         # embedded copy of STATUS_CONTRACT.
         status_page = bool(p.get("status_page"))
         baseline_check = bool(p.get("baseline_check"))
+        ov, ov_err = sanitize_overrides(p.get("overrides"))
+        if ov_err:
+            self._json({"error": ov_err}, 400)
+            return
         err = validate_inputs(goal, references, constraints, boundaries)
         if err:
             self._json({"error": err}, 400)
@@ -1886,7 +2069,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if not p.get("stream"):
             result, err = generate_blocking(goal, mode, work_type, references,
                                             constraints, boundaries, harness,
-                                            status_page, baseline_check)
+                                            status_page, baseline_check, ov=ov)
             if err:
                 self._json({"error": err}, 502)
                 return
@@ -1898,7 +2081,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         resp, err = open_vllm(
             build_user_message(goal, mode, work_type, references, constraints,
                                boundaries, harness),
-            stream=True)
+            stream=True, ov=ov)
         if err:
             self._json({"error": err}, 502)
             return
