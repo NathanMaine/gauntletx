@@ -143,6 +143,10 @@ THE PROMPT YOU WRITE — exactly three parts, as plain flowing paragraphs, no he
    sub-agents heavily and keep iterating continuously.' — opencode has primary agents
    and sub-agents it can delegate to, but no /loop and no ultracode, and the model
    behind it is whichever provider the user has configured, so never assume a
+   frontier model's headroom. For Antigravity, end with that same sentence, 'Use
+   sub-agents heavily and keep iterating continuously.' — Antigravity's main agent
+   decomposes a task and clones itself into parallel sub-agents, but it has no /loop
+   and no ultracode, and it defaults to a flash-tier Gemini model, so never assume a
    frontier model's headroom. For a local-model or API-model target (Qwen3 Coder Next, Qwen 3.8,
    DeepSeek V4 Flash, Qwen 3.8 Max (API)), the prompt will be run by an agentic CLI
    driving that model:
@@ -211,7 +215,7 @@ is the lead agent's job at run time, never yours. If boundaries were given, the 
 paragraph ends with the boundary sentence and the critic automatic-fail sentence.>
 ### NOTES
 <1-4 short bullets, every one matched to the target harness. ALWAYS include one line of
-run expectations, and pick it by harness family. For Claude Code, Codex, Gemini CLI, opencode, and
+run expectations, and pick it by harness family. For Claude Code, Codex, Gemini CLI, opencode, Antigravity, and
 the local-model and API-model targets the line is equivalent to: "This loop runs for hours, consumes
 tokens heavily (comfortable on a subscription plan, real money on API pricing), and will
 rarely stop on its own — watch the progress page and stop the run when improvement per
@@ -221,9 +225,9 @@ chat has no progress page, so a (web) target's NOTES never mention one. For a (w
 target, ALWAYS also include one bullet saying this prompt is the chat adaptation of a
 method built for agentic harnesses — Claude Code or Codex pointed at the same goal will
 go further. That bullet belongs to the four (web) targets alone: when the target already
-IS an agentic harness (Claude Code, Codex, Gemini CLI, opencode, a local model), NOTES skip it.
+IS an agentic harness (Claude Code, Codex, Gemini CLI, opencode, Antigravity, a local model), NOTES skip it.
 Other bullets as useful: how to run it — paste into the target harness, and the
-"/effort ultracode" tip only in a Claude Code prompt's NOTES (Codex, Gemini CLI, opencode, local,
+"/effort ultracode" tip only in a Claude Code prompt's NOTES (Codex, Gemini CLI, opencode, Antigravity, local,
 and (web) targets have no ultracode, so their NOTES never suggest it) — and one
 variation worth trying, like the article's optional smoothing pass: a fresh agent at the
 end of each wave making the separately-improved pieces feel like one thing.>"""
@@ -253,7 +257,7 @@ FIELD RULES
 - BOUNDARIES: the safety limits an unattended multi-hour run needs for THIS ask (for
   anything existing/production-adjacent: work on a local copy, no deploys, nothing
   pushed live). Empty when nothing is implied.
-- HARNESS: exactly one of: Claude Code, Codex, Gemini CLI, opencode, Qwen3 Coder Next (local),
+- HARNESS: exactly one of: Claude Code, Codex, Gemini CLI, opencode, Antigravity, Qwen3 Coder Next (local),
   Qwen 3.8 (local), DeepSeek V4 Flash (local), Qwen 3.8 Max (API), Claude (web),
   ChatGPT (web), Google Gemini (web), Grok (web). "Claude Code" unless the user names another harness
   on that list — then copy that value exactly as written above. Nicknames map to the
@@ -261,7 +265,8 @@ FIELD RULES
   Next (local); "qwen 3.8" → Qwen 3.8 (local); "qwen 3.8 max", "qwen max", or "qwen ... api" →
   Qwen 3.8 Max (API); "deepseek" → DeepSeek V4 Flash (local);
   "gemini cli" → Gemini CLI; bare "gemini" → Google Gemini (web); "opencode" or
-  "open code" → opencode; "claude code" →
+  "open code" → opencode; "antigravity", "anti gravity", or "antigravity cli" →
+  Antigravity; "claude code" →
   Claude Code; bare "claude" or "claude.ai" → Claude (web); "chatgpt" or "gpt" →
   ChatGPT (web); "grok" → Grok (web). "I'll paste this into chatgpt" means the harness
   is ChatGPT (web). Never write a shortened form like "Qwen3 Coder (local)" or
@@ -313,7 +318,7 @@ HARNESSES = (
     # Agentic CLIs. opencode MUST stay after Codex: coerce_harness matches
     # _HARNESS_KEYS in roster order with a two-way prefix test, and a bare
     # "code" has to keep landing on Codex the way it always did.
-    "Claude Code", "Codex", "Gemini CLI", "opencode",
+    "Claude Code", "Codex", "Gemini CLI", "opencode", "Antigravity",
     # Local & API models (an agentic CLI — e.g. Qwen Code in VSCode — drives them)
     "Qwen3 Coder Next (local)", "Qwen 3.8 (local)", "DeepSeek V4 Flash (local)",
     "Qwen 3.8 Max (API)",
@@ -984,7 +989,8 @@ footer a{color:var(--accent);text-decoration:none}
     <div class="row">
       <div class="field"><label for="dharness">Target harness</label><select id="dharness">
         <optgroup label="Agentic CLIs"><option>Claude Code</option><option>Codex</option>
-          <option>Gemini CLI</option><option>opencode</option></optgroup>
+          <option>Gemini CLI</option><option>opencode</option>
+          <option>Antigravity</option></optgroup>
         <optgroup label="Local &amp; API models"><option>Qwen3 Coder Next (local)</option>
           <option>Qwen 3.8 (local)</option><option>DeepSeek V4 Flash (local)</option>
           <option>Qwen 3.8 Max (API)</option></optgroup>
@@ -1027,7 +1033,8 @@ footer a{color:var(--accent);text-decoration:none}
       <option>Marketing</option><option>Research</option><option>Other</option></select></div>
     <div class="field"><label for="harness">Target harness</label><select id="harness">
       <optgroup label="Agentic CLIs"><option>Claude Code</option><option>Codex</option>
-        <option>Gemini CLI</option><option>opencode</option></optgroup>
+        <option>Gemini CLI</option><option>opencode</option>
+        <option>Antigravity</option></optgroup>
       <optgroup label="Local &amp; API models"><option>Qwen3 Coder Next (local)</option>
         <option>Qwen 3.8 (local)</option><option>DeepSeek V4 Flash (local)</option>
         <option>Qwen 3.8 Max (API)</option></optgroup>
@@ -1296,6 +1303,10 @@ function updateHnotes(){
   const h=$('harness').value;let warn=false,txt='';
   if(h.endsWith('(web)')){warn=true;
     txt='⚠ Chat adaptation active — '+h.replace(' (web)','')+' is a chat window, not an agentic harness: it can’t fan out builder and critic agents, inspect its own output, or keep looping unattended. Your prompt runs the gauntlet as rounds inside the conversation instead — build → harsh critique against the bar → rebuild — and you type “continue” to drive each round. Expect a lighter version of the method; Claude Code or Codex will push much further on the same goal.';}
+  else if(h==='Gemini CLI'){warn=true;
+    txt='⚠ Gemini CLI was retired on 18 June 2026 and replaced by Antigravity CLI. Free, Google AI Pro and Ultra access ended that day; only Gemini Code Assist Standard/Enterprise licences still run it. Unless you hold one of those, pick Antigravity instead — the generated prompt is identical, both get the same sub-agent closer.';}
+  else if(h==='Antigravity'){
+    txt='Antigravity’s main agent decomposes a task and clones itself into parallel sub-agents, so the prompt asks it to fan out and keep iterating — but there is no /loop and no ultracode. It defaults to a flash-tier Gemini model: strong at building, weaker as a critic. If the goal is visual, confirm the critic model accepts images before trusting a blind side-by-side.';}
   else if(h==='opencode'){
     txt='opencode delegates to sub-agents but has no /loop and no ultracode, so the prompt asks it to keep iterating rather than to loop. Quality tracks whichever provider you point it at, not opencode itself — a small local model will build fine and critique weakly. If the goal is visual, check the critic model accepts images: a text-only model cannot blind-compare screenshots and will fall back to reading its own source and calling it good.';}
   else if(h.endsWith('(local)')||h.endsWith('(API)')){
@@ -1408,7 +1419,7 @@ async function runDraft(){
     /* the server coerces to this same whitelist; the guard keeps an off-list
        value from leaving the select empty. The drafted harness lands in BOTH
        selects — one choice, both tabs. */
-    const HS=['Claude Code','Codex','Gemini CLI','opencode','Qwen3 Coder Next (local)',
+    const HS=['Claude Code','Codex','Gemini CLI','opencode','Antigravity','Qwen3 Coder Next (local)',
       'Qwen 3.8 (local)','DeepSeek V4 Flash (local)','Qwen 3.8 Max (API)','Claude (web)',
       'ChatGPT (web)','Google Gemini (web)','Grok (web)'];
     if(!j.goal){
@@ -1918,7 +1929,8 @@ def main():
                          "starting fresh")
     ap.add_argument("--harness", default="Claude Code",
                     help="target harness: 'Claude Code' (default), 'Codex', "
-                         "'Gemini CLI', 'opencode', 'Qwen3 Coder Next (local)', "
+                         "'Gemini CLI', 'opencode', 'Antigravity', "
+                         "'Qwen3 Coder Next (local)', "
                          "'Qwen 3.8 (local)', 'DeepSeek V4 Flash (local)', 'Qwen 3.8 Max (API)', "
                          "'Claude (web)', 'ChatGPT (web)', "
                          "'Google Gemini (web)', or 'Grok (web)'")

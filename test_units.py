@@ -18,7 +18,7 @@ from gauntletx import (HARNESSES, STATUS_CONTRACT, apply_status_contract,
 
 # Sanity: the roster the cases coerce onto, in UI <optgroup> order.
 assert HARNESSES == (
-    "Claude Code", "Codex", "Gemini CLI", "opencode",
+    "Claude Code", "Codex", "Gemini CLI", "opencode", "Antigravity",
     "Qwen3 Coder Next (local)", "Qwen 3.8 (local)", "DeepSeek V4 Flash (local)",
     "Qwen 3.8 Max (API)",
     "Claude (web)", "ChatGPT (web)", "Google Gemini (web)", "Grok (web)",
@@ -124,6 +124,22 @@ OPENCODE_CASES = [
 ]
 assert len(OPENCODE_CASES) == 8, "opencode case count drifted: %d" % len(OPENCODE_CASES)
 
+# 8 v0.2.6 cases: the Antigravity target. Named "Antigravity", NOT "Google
+# Antigravity" — the latter's key would prefix-match a bare "google" from the
+# Agentic CLIs group, ahead of Google Gemini (web) in the Online chat group,
+# silently breaking that alias. The last three pin the aliases that must survive.
+ANTIGRAVITY_CASES = [
+    ("Antigravity", "Antigravity"),
+    ("antigravity", "Antigravity"),
+    ("  ANTIGRAVITY  ", "Antigravity"),
+    ("anti gravity", "Antigravity"),
+    ("antigravity cli", "Antigravity"),
+    ("google", "Google Gemini (web)"),   # regression pin — must NOT become Antigravity
+    ("gemini", "Google Gemini (web)"),   # regression pin
+    ("gemini cli", "Gemini CLI"),        # regression pin — retired, but still on the roster
+]
+assert len(ANTIGRAVITY_CASES) == 8, "antigravity case count drifted: %d" % len(ANTIGRAVITY_CASES)
+
 # 12 v0.2.3 cases: apply_status_contract — flag × harness family, plus the
 # nothing-to-append-to guards. The append is deterministic (the fixed
 # STATUS_CONTRACT paragraph, never the model), so equality checks are exact.
@@ -160,7 +176,8 @@ def main():
     total = 0
     for label, cases in (("v0.2.1", V021_CASES), ("0.2.2-alias", ALIAS_CASES),
                          ("0.2.4-api", API_CASES),
-                         ("0.2.5-opencode", OPENCODE_CASES)):
+                         ("0.2.5-opencode", OPENCODE_CASES),
+                         ("0.2.6-antigravity", ANTIGRAVITY_CASES)):
         for value, want in cases:
             total += 1
             got = coerce_harness(value)

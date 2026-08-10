@@ -3,6 +3,42 @@
 Notable changes, newest first. The image tag carries the version, so what
 `/api/version` reports is what this file explains.
 
+## 0.2.6 — 2026-08-09
+
+Thirteenth harness target: **Antigravity**, Google's agent-first IDE and CLI.
+Its main agent decomposes a task and clones itself into parallel sub-agents, but
+it has no `/loop` and no ultracode, so it joins the Codex / Gemini CLI / opencode
+closer family.
+
+**Gemini CLI is dead and the roster did not know.** Google retired it on
+18 June 2026 and replaced it with Antigravity CLI; free, Google AI Pro and Ultra
+access ended that day, and only Gemini Code Assist Standard/Enterprise licences
+still run it. gauntletx had been generating prompts for a tool most users can no
+longer execute. The target stays — enterprise licence holders still have it — but
+it now carries a warning note pointing at Antigravity, which generates an
+identical prompt.
+
+### Added
+
+- `Antigravity` across every layer: HARNESSES, SYSTEM_PROMPT closer family,
+  NOTES harness families, DRAFT_PROMPT enum + nicknames ("anti gravity",
+  "antigravity cli"), both UI selects, JS whitelist, CLI help, README.
+- A per-target hnote for `Antigravity`: sub-agents yes, `/loop` and ultracode no,
+  and the caveat that it defaults to a flash-tier Gemini model — strong at
+  building, weaker as a critic, and to confirm the critic accepts images before
+  trusting a blind side-by-side on a visual goal.
+- A **warning** hnote for `Gemini CLI` — the first note on the roster that says a
+  target may not run at all, rather than that it runs the method differently.
+- `test_units.py`: 8 new cases (83/83 total).
+
+### Naming
+
+- The target is `Antigravity`, **not** `Google Antigravity`. The latter's
+  matching key would prefix-match a bare "google" from the Agentic CLIs group,
+  ahead of `Google Gemini (web)` in the Online chat group, silently breaking that
+  alias. Regression-pinned: bare "google" and bare "gemini" both still resolve to
+  `Google Gemini (web)`.
+
 ## 0.2.5 — 2026-08-09
 
 Twelfth harness target: **opencode**. It has primary agents and sub-agents it

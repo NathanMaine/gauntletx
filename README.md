@@ -13,7 +13,7 @@
   <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-22c55e"></a>
   <img alt="Python 3.9+" src="https://img.shields.io/badge/python-3.9+-3b82f6">
   <img alt="zero dependencies" src="https://img.shields.io/badge/dependencies-zero-14b8a6">
-  <img alt="12 harness targets" src="https://img.shields.io/badge/harness%20targets-12-8b5cf6">
+  <img alt="13 harness targets" src="https://img.shields.io/badge/harness%20targets-13-8b5cf6">
   <img alt="runs fully local" src="https://img.shields.io/badge/runs-fully%20local-0ea5e9">
 </p>
 
@@ -53,18 +53,20 @@ the job gauntletx does for you.
 | | |
 | --- | --- |
 | 🎯 **Picks the bar** | Prefers something a machine can check — a test suite, a benchmark, a latency target — over "make it amazing" |
-| 🎭 **Twelve targets** | Agentic CLIs — including **opencode** — plus local/API models and browser chats, each getting correctly adapted phrasing |
+| 🎭 **Thirteen targets** | Agentic CLIs — including **opencode** and **Antigravity** — plus local/API models and browser chats, each getting correctly adapted phrasing |
 | 🚧 **Hard boundaries** | "Local only, nothing deployed" becomes a rule critics enforce as an automatic fail |
 | 📊 **Live progress page** | Optional toggle appends a fixed `progress.html` contract — real timestamps, no invented history |
 | 🔒 **Fully local** | Your goal text never leaves the machine you point it at |
 
 ### Where you can paste it
 
-Twelve targets, each getting phrasing that matches what the tool can actually do:
+Thirteen targets, each getting phrasing that matches what the tool can actually do:
 
 | Group | Targets | What the prompt ends with |
 | --- | --- | --- |
-| **Agentic CLIs** | Claude Code *(default)*, Codex, Gemini CLI, **opencode** | sub-agents and continuous iteration; `/loop` + ultracode on Claude Code only |
+| **Agentic CLIs** | Claude Code *(default)*, Codex, Gemini CLI †, **opencode**, **Antigravity** | sub-agents and continuous iteration; `/loop` + ultracode on Claude Code only |
+
+† **Gemini CLI was retired on 18 June 2026** and replaced by Antigravity CLI. Free, Google AI Pro and Ultra access ended that day; only Gemini Code Assist Standard/Enterprise licences still run it. The target stays on the roster for those licence holders — everyone else should pick **Antigravity**, which generates an identical prompt.
 | **Local & API models** | Qwen3 Coder Next, Qwen 3.8, DeepSeek V4 Flash, Qwen 3.8 Max (API) | builders and critics as separate fresh-context sessions |
 | **Online chat** | Claude, ChatGPT, Google Gemini, Grok *(web)* | rounds inside the conversation, driven by you saying *continue* |
 
@@ -217,6 +219,7 @@ python3 gauntletx.py --quiet "..." | pbcopy                # prompt only, straig
 python3 gauntletx.py --type writing --refs "PG's essays" "rewrite my launch post"
 python3 gauntletx.py --harness Codex "..."                 # Codex phrasing (no ultracode)
 python3 gauntletx.py --harness opencode "..."              # opencode — sub-agents, no /loop, no ultracode
+python3 gauntletx.py --harness Antigravity "..."           # Google Antigravity — same closer as opencode/Codex
 python3 gauntletx.py --harness "Qwen 3.8 (local)" "..."    # or "Gemini CLI", "Qwen3 Coder Next (local)", "DeepSeek V4 Flash (local)"
 python3 gauntletx.py --harness "ChatGPT (web)" "..."       # chat adaptation — or "Claude (web)", "Google Gemini (web)", "Grok (web)"
 python3 gauntletx.py --polish --boundaries "local only — nothing live" "raise my portfolio site to the bar"
@@ -398,7 +401,7 @@ form (and a follow-up `/api/generate`) will accept:
   `Website or app`, `Writing`, `Backend or code`, `Design`, `Marketing`,
   `Research`, `Other`); anything else becomes `Auto`.
 - `harness` — one of `Claude Code`, `Codex`, `Gemini CLI`, `opencode`,
-  `Qwen3 Coder Next (local)`, `Qwen 3.8 (local)`, `DeepSeek V4 Flash (local)`,
+  `Antigravity`, `Qwen3 Coder Next (local)`, `Qwen 3.8 (local)`, `DeepSeek V4 Flash (local)`,
   `Claude (web)`, `ChatGPT (web)`, `Google Gemini (web)`, `Grok (web)`.
   Tolerant aliases land on the roster ("gemini cli" → `Gemini CLI` but bare
   "gemini" → `Google Gemini (web)`; "claude code" → `Claude Code` but bare
@@ -512,7 +515,7 @@ What this repo actually contains is:
   (`harden_output` verifies and repairs what the model can't be trusted to
   reproduce).
 - **The architecture** — a stdlib-only single-file server/CLI with streaming,
-  model auto-discovery, twelve harness targets with per-target prompt adaptation,
+  model auto-discovery, thirteen harness targets with per-target prompt adaptation,
   and a hardened read-only container deployment. No dependencies to rot.
 - **The verification** — no version ships on "looks right." Every release
   passed adversarial review and live end-to-end runs against a real model
