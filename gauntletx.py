@@ -802,7 +802,11 @@ METHOD_CONTRACT = (
     "Use whatever sub-agent facility your harness actually gives you. If it has none, "
     "run the rounds yourself across turns instead — never build an agent framework, "
     "orchestrator or SDK integration to do it, and never ask for an API key in order to "
-    "spawn agents. Builders and critics are how you work, not something you construct.")
+    "spawn agents. Builders and critics are how you work, not something you construct. "
+    "If a command fails twice with the same error, do not run it a third time: write the "
+    "command, the error, and what you will try instead into your notes on disk, then "
+    "change approach. Repeating a failing command is how an unattended run burns hours "
+    "without moving.")
 
 
 def apply_method_contract(prompt, harness):

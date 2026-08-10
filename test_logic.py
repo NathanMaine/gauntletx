@@ -181,6 +181,13 @@ check_true("method contract forbids frameworks",
            "never build an agent framework" in G.METHOD_CONTRACT)
 check_true("method contract forbids key requests",
            "never ask for an API key" in G.METHOD_CONTRACT)
+# Retry hygiene, added after a run repeated one SyntaxError-producing command ~10
+# times. Worded to leave an artifact (a notes entry) rather than to ask for pure
+# restraint — behavioural clauses have a poor record here, structural ones do not.
+check_true("method contract caps retries",
+           "fails twice with the same error" in G.METHOD_CONTRACT)
+check_true("method contract demands a written blocker",
+           "into your notes on disk" in G.METHOD_CONTRACT)
 
 # ------------------------------------------------------ sanitize_overrides
 def _ok(raw):

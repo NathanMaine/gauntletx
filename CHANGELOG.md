@@ -3,6 +3,38 @@
 Notable changes, newest first. The image tag carries the version, so what
 `/api/version` reports is what this file explains.
 
+## 0.3.4 — 2026-08-10
+
+**Retry hygiene in `METHOD_CONTRACT`.** An observed run repeated one
+`python3 -c` command about ten times, each failing with the same `SyntaxError`
+because its multi-line script had been flattened onto one line. Roughly one model
+request every 25 seconds, one source file touched in five minutes, and nothing
+moving. Nobody watching an overnight run would have noticed.
+
+> If a command fails twice with the same error, do not run it a third time: write
+> the command, the error, and what you will try instead into your notes on disk,
+> then change approach. Repeating a failing command is how an unattended run burns
+> hours without moving.
+
+### Why it is worded to produce an artifact
+
+The obvious phrasing is "do not retry a failing command", which is a **pure
+behavioural** clause — and those have a poor record here. `STATUS_CONTRACT` says
+"never backfilled, never invented" and a run fabricated an entire activity-log
+timeline anyway, while honouring every *structural* clause in the same contract.
+
+So the rule ends in a written blocker entry rather than in restraint. A notes
+entry is inspectable; abstinence is not. Whether it holds is an open question —
+this is the first behavioural-leaning clause shipped here, and it is deliberately
+paired with an artifact so its failure would be visible.
+
+### Added
+
+- The clause lives in `METHOD_CONTRACT`, not `BASELINE_CONTRACT`: the baseline
+  contract is about metrics, this is execution discipline. Folded in rather than
+  given its own contract, to avoid growing every prompt with a third append.
+- `test_logic.py` → **126 checks**; 217 across both suites.
+
 ## 0.3.3 — 2026-08-10
 
 Footer layout. 0.3.2 added the credit link but left everything on two dot-run
