@@ -28,7 +28,9 @@ import http.client
 import http.server
 import json
 import os
+import pathlib
 import re
+import shutil
 import socketserver
 import sys
 import threading
@@ -898,6 +900,92 @@ def draft_blocking(description):
             "harness": harness, "raw": raw}, None
 
 
+def run_selftest():
+    """Run both unit suites plus a served-JS parse check, in-process.
+
+    Exists because two shipped regressions were things a human eyeball missed
+    and no test covered: a harness that silently coerced to the wrong value,
+    and a client-side function declared inside another function so the call
+    site threw and ate the whole result. Neither broke Python syntax.
+
+    Returns {"ok": bool, "suites": [...], "summary": str}. Never raises — a
+    crashed suite is reported as a failed suite."""
+    import io as _io
+    import runpy
+    import subprocess
+    import contextlib
+
+    here = pathlib.Path(__file__).resolve().parent
+    suites = []
+
+    for name in ("test_units.py", "test_logic.py"):
+        path = here / name
+        if not path.exists():
+            suites.append({"name": name, "ok": False, "detail": "missing"})
+            continue
+        buf = _io.StringIO()
+        try:
+            with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+                try:
+                    runpy.run_path(str(path), run_name="__main__")
+                except SystemExit as e:
+                    if e.code not in (0, None):
+                        raise RuntimeError("exit {}".format(e.code))
+            out = buf.getvalue().strip()
+            suites.append({"name": name, "ok": True,
+                           "detail": out.splitlines()[-1] if out else "ok"})
+        except Exception as e:
+            out = buf.getvalue().strip()
+            suites.append({"name": name, "ok": False,
+                           "detail": "{}: {}".format(type(e).__name__, e),
+                           "output": out[-1500:]})
+
+    # served-JS parse check: the 0.2.8 bug was valid syntax, so this is a floor,
+    # not a ceiling — it catches the class of error that breaks the page outright.
+    try:
+        page = (here / "gauntletx.py").read_text(encoding="utf-8")
+        import re as _re
+        blocks = _re.findall(r"<script>(.*?)</script>", page, _re.S)
+        js = max(blocks, key=len) if blocks else ""
+        js = (js.replace("__STATUS_CONTRACT__", json.dumps(STATUS_CONTRACT))
+                .replace("__BASELINE_CONTRACT__", json.dumps(BASELINE_CONTRACT))
+                .replace("__VERSION__", json.dumps(VERSION)))
+        node = shutil.which("node")
+        if not node:
+            suites.append({"name": "served JS", "ok": True,
+                           "detail": "skipped — node not installed"})
+        else:
+            tmp = here / ".selftest.js"
+            tmp.write_text(js, encoding="utf-8")
+            try:
+                r = subprocess.run([node, "--check", str(tmp)],
+                                   capture_output=True, text=True, timeout=30)
+                ok = r.returncode == 0
+                suites.append({"name": "served JS", "ok": ok,
+                               "detail": "node --check passed" if ok
+                               else (r.stderr or "").strip()[:400]})
+            finally:
+                try:
+                    tmp.unlink()
+                except OSError:
+                    pass
+        # top-level reachability of both contract appenders — the 0.2.8 bug
+        for fn in ("applyStatusContract", "applyBaselineContract"):
+            declared = _re.search(r"^function " + fn + r"\b", js, _re.M) is not None
+            suites.append({"name": "JS " + fn + " top-level", "ok": declared,
+                           "detail": "declared at top level" if declared
+                           else "NOT declared at top level — call sites will throw"})
+    except Exception as e:
+        suites.append({"name": "served JS", "ok": False,
+                       "detail": "{}: {}".format(type(e).__name__, e)})
+
+    ok = all(x["ok"] for x in suites)
+    passed = sum(1 for x in suites if x["ok"])
+    return {"ok": ok, "suites": suites,
+            "summary": "{}/{} checks pass".format(passed, len(suites)),
+            "version": VERSION}
+
+
 def version_info():
     """The /api/version payload. The reachability probe is deliberately short
     (3s): this endpoint feeds the UI footer and the healthcheck, and neither
@@ -1055,6 +1143,10 @@ footer a{color:var(--accent);text-decoration:none}
       <span class="hint" id="dbasehint">Any score must be printed beside a constant-predictor score and the label distribution — catches a metric that looks perfect but means nothing.</span>
     </div>
     <p class="hnote" id="hnote_d" hidden></p>
+    <div class="row">
+      <button id="selftest" class="ghost">Run self-test</button>
+      <span class="hint" id="selftestout">Runs both unit suites and a served-JS check before you spend a run.</span>
+    </div>
     <div class="row">
       <button id="draftgo">Draft the form &#8594;</button>
       <span class="hint" id="drafthint" hidden><span class="spin"></span> drafting&#8230;</span>
@@ -1418,6 +1510,22 @@ function autoBaseline(){
   ['basehint','dbasehint'].forEach(id=>{const e=$(id);if(e)e.textContent=BASE_HINT+why});
 }
 $('wtype').addEventListener('change',autoBaseline);
+/* Self-test button: runs the suites server-side and reports inline. Exists
+   because two shipped regressions were invisible to Python syntax checks —
+   a harness coerced to the wrong value, and a client-side function declared
+   inside another so its call site threw and ate the result. */
+$('selftest').addEventListener('click',async()=>{
+  const b=$('selftest'),o=$('selftestout');
+  b.disabled=true;o.textContent='Running…';o.style.color='';
+  try{
+    const r=await fetch('/api/selftest');const j=await r.json();
+    const bad=(j.suites||[]).filter(x=>!x.ok);
+    o.style.color=j.ok?'var(--ok,#22c55e)':'var(--bad,#ef4444)';
+    o.textContent=(j.ok?'PASS — ':'FAIL — ')+j.summary+
+      (bad.length?': '+bad.map(x=>x.name+' ('+x.detail+')').join('; '):'');
+  }catch(e){o.style.color='var(--bad,#ef4444)';o.textContent='self-test could not run: '+e.message}
+  finally{b.disabled=false}
+});
 $('baseline').addEventListener('change',()=>{baselineTouched=true;$('dbaseline').checked=$('baseline').checked});
 $('dbaseline').addEventListener('change',()=>{baselineTouched=true;$('baseline').checked=$('dbaseline').checked});
 $('statuspage').addEventListener('change',()=>{$('dstatuspage').checked=$('statuspage').checked});
@@ -1593,6 +1701,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         route = self.path.split("?")[0]
         if route == "/api/version":
             self._json(version_info())
+            return
+        if route == "/api/selftest":
+            self._json(run_selftest())
             return
         if route in ("/", "/index.html"):
             # __STATUS_CONTRACT__ is templated in like __VERSION__ (as a JSON

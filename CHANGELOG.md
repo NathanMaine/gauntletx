@@ -3,6 +3,56 @@
 Notable changes, newest first. The image tag carries the version, so what
 `/api/version` reports is what this file explains.
 
+## 0.2.11 — 2026-08-10
+
+**A self-test you can run before spending a generation.** New `Run self-test`
+button on the first tab and a `GET /api/selftest` endpoint behind it.
+
+Two regressions shipped in two days and neither was catchable by reading the
+diff or by checking Python syntax: a harness that silently coerced to the wrong
+value (0.2.5), and a client-side function declared inside another function so
+its call site threw and ate the whole result (0.2.10, see
+`docs/issue-002-streaming-result-loss.md`).
+
+The self-test runs, in-process:
+
+| Check | Catches |
+|---|---|
+| `test_units.py` | harness coercion, both contract doors |
+| `test_logic.py` | every pure function reachable without a network |
+| `node --check` on the **served** JS | syntax errors in the page as rendered |
+| top-level declaration of both contract appenders | a valid-but-unreachable nested declaration |
+
+That last row exists because `node --check` **passed** on the code that caused
+issue 002. It asserts the property that actually failed rather than the one that
+is easy to test.
+
+### Added
+
+- `run_selftest()`, `GET /api/selftest`, and the button. Never raises — a
+  crashed suite is reported as a failed suite. Skips the node checks with a
+  pass and a note when node is not installed.
+- **`test_logic.py` — 76 checks** covering the pure surface: `_num`,
+  `_harness_key`, `models_url`, `_headers`, `is_web_harness`, `validate_inputs`,
+  `build_user_message`, `parse_sections`, `_prompt_span`, `_repair_web_closer`,
+  `harden_output`, both raw-reflection doors, `sse_events`, and `SectionStream`.
+- Combined: **167 checks** across the two suites (91 + 76).
+
+### On coverage
+
+Every function that can be exercised without a network or a bound socket is now
+covered. The remainder — `resolve_model`, `open_vllm`, `call_blocking`,
+`generate_blocking`, `draft_blocking`, `run_server`, `run_cli`, `_print_final`,
+`Handler`, `GXServer`, `version_info` — needs a live vLLM or a socket, and
+"covering" them would mean asserting against mocks the suite wrote itself. The
+exclusion list and the reason are in `test_logic.py`'s docstring rather than
+implied by a percentage.
+
+One test was wrong and the code was right: `build_user_message` does not omit
+empty sections, it fills them with explicit `none` markers so the model knows a
+section was considered rather than forgotten. The test now asserts the real
+design.
+
 ## 0.2.10 — 2026-08-10
 
 **Fixes a regression in 0.2.8 that 0.2.9 made unavoidable.** On the streaming

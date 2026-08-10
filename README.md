@@ -223,6 +223,22 @@ python3 gauntletx.py --harness opencode "..."              # opencode — sub-ag
 python3 gauntletx.py --harness Antigravity "..."           # Google Antigravity — same closer as opencode/Codex
 python3 gauntletx.py --baseline-check "..."                # require constant/random baselines beside any score
 
+### Run self-test
+
+A `Run self-test` button on the first tab, and `GET /api/selftest` behind it. It runs both
+unit suites, parses the **served** JavaScript with `node --check`, and asserts that both
+contract appenders are declared at top level — three seconds before a run that can take
+ninety minutes.
+
+That last assertion is not decoration: a client-side function once ended up declared
+*inside* another function, which is valid JavaScript and passes a syntax check, but made
+its call site throw and silently discarded a completed generation. See
+[issue-002-streaming-result-loss.md](docs/issue-002-streaming-result-loss.md).
+
+```bash
+python3 test_units.py && python3 test_logic.py    # 167 checks, or use the button
+```
+
 ### Baseline sanity check
 
 A measurable bar is the easiest kind to satisfy by accident. This toggle appends a fixed
