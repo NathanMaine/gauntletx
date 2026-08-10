@@ -65,10 +65,10 @@ Thirteen targets, each getting phrasing that matches what the tool can actually 
 | Group | Targets | What the prompt ends with |
 | --- | --- | --- |
 | **Agentic CLIs** | Claude Code *(default)*, Codex, Gemini CLI †, **opencode**, **Antigravity** | sub-agents and continuous iteration; `/loop` + ultracode on Claude Code only |
-
-† **Gemini CLI was retired on 18 June 2026** and replaced by Antigravity CLI. Free, Google AI Pro and Ultra access ended that day; only Gemini Code Assist Standard/Enterprise licences still run it. The target stays on the roster for those licence holders — everyone else should pick **Antigravity**, which generates an identical prompt.
 | **Local & API models** | Qwen3 Coder Next, Qwen 3.8, DeepSeek V4 Flash, Qwen 3.8 Max (API) | builders and critics as separate fresh-context sessions |
 | **Online chat** | Claude, ChatGPT, Google Gemini, Grok *(web)* | rounds inside the conversation, driven by you saying *continue* |
+
+† **Gemini CLI was retired on 18 June 2026** and replaced by Antigravity CLI. Free, Google AI Pro and Ultra access ended that day; only Gemini Code Assist Standard/Enterprise licences still run it. The target stays on the roster for those licence holders — everyone else should pick **Antigravity**, which generates an identical prompt.
 
 The **(web) targets are a deliberate adaptation, not a pretence.** A chat
 window has no sub-agents, no `/loop`, and no live progress page — so those
@@ -401,12 +401,15 @@ form (and a follow-up `/api/generate`) will accept:
   `Website or app`, `Writing`, `Backend or code`, `Design`, `Marketing`,
   `Research`, `Other`); anything else becomes `Auto`.
 - `harness` — one of `Claude Code`, `Codex`, `Gemini CLI`, `opencode`,
-  `Antigravity`, `Qwen3 Coder Next (local)`, `Qwen 3.8 (local)`, `DeepSeek V4 Flash (local)`,
-  `Claude (web)`, `ChatGPT (web)`, `Google Gemini (web)`, `Grok (web)`.
+  `Antigravity`, `Qwen3 Coder Next (local)`, `Qwen 3.8 (local)`,
+  `DeepSeek V4 Flash (local)`, `Qwen 3.8 Max (API)`, `Claude (web)`,
+  `ChatGPT (web)`, `Google Gemini (web)`, `Grok (web)`.
   Tolerant aliases land on the roster ("gemini cli" → `Gemini CLI` but bare
   "gemini" → `Google Gemini (web)`; "claude code" → `Claude Code` but bare
   "claude"/"claude.ai" → `Claude (web)`; "chatgpt"/"gpt" → `ChatGPT (web)`;
-  "grok" → `Grok (web)`); anything else becomes `Claude Code`.
+  "grok" → `Grok (web)`; "open code" → `opencode`; "anti gravity"/"antigravity
+  cli" → `Antigravity`; "qwen max"/"qwen ... api" → `Qwen 3.8 Max (API)` while
+  bare "qwen 3.8" stays `Qwen 3.8 (local)`); anything else becomes `Claude Code`.
 - All fields are trimmed, and the generate caps apply (goal 8000 chars,
   references 8000, constraints 4000, boundaries 2000).
 
