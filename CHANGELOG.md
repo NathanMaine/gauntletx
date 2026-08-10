@@ -3,6 +3,36 @@
 Notable changes, newest first. The image tag carries the version, so what
 `/api/version` reports is what this file explains.
 
+## 0.2.13 — 2026-08-10
+
+**The self-test now checks the model, not just the code**, and the button is on
+both tabs.
+
+0.2.11's self-test proved the code was sound and said nothing about whether a
+run could actually start — which is the failure people hit most: the box is off,
+the served model was swapped, a pinned name went stale. Three live checks added:
+
+| Check | Catches |
+|---|---|
+| model endpoint | the backend being unreachable, or reachable but serving nothing |
+| model name matches | a pinned `GAUNTLETX_MODEL` the server is not serving — vLLM serves one model and 404s any other name, so every generation dies at the door with nothing in the UI to explain it |
+| generation round-trip | a backend that answers `/v1/models` but cannot actually generate |
+
+The response now separates `code_ok` from `live_ok`, so "your code is fine, your
+model is down" is distinguishable at a glance from a real regression. Verified
+with a negative control against an unreachable endpoint: 5/6, `code_ok: true`,
+`live_ok: false`.
+
+### Changed
+
+- The **Run self-test** button now appears on **both** tabs — beside *Generate*
+  on the form tab as well as above *Draft the form* — sharing one handler that
+  reports into whichever status line is on screen. The draft-tab twin follows
+  the repo's `d`-prefix convention (`dselftest`), matching `dharness` and
+  `dstatuspage`.
+- Round-trip uses `max_tokens: 1`, so the check costs one token and reports its
+  own latency.
+
 ## 0.2.12 — 2026-08-10
 
 Packaging fix for 0.2.11. The Dockerfile copied only `gauntletx.py`,

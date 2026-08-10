@@ -34,6 +34,7 @@ import shutil
 import socketserver
 import sys
 import threading
+import time
 import urllib.error
 import urllib.request
 
@@ -979,10 +980,64 @@ def run_selftest():
         suites.append({"name": "served JS", "ok": False,
                        "detail": "{}: {}".format(type(e).__name__, e)})
 
+    # ---- live model checks -------------------------------------------------
+    # The pure checks above prove the CODE is sound. They say nothing about
+    # whether a run can actually start, which is the failure people hit most:
+    # the box is off, the model was swapped, the key expired. A self-test you
+    # run "before spending a run" has to answer that too.
+    served = None
+    try:
+        req = urllib.request.Request(models_url(), headers=_headers())
+        with urllib.request.urlopen(req, timeout=8) as r:
+            data = json.loads(r.read())
+        ids = [m.get("id") for m in (data.get("data") or []) if isinstance(m, dict)]
+        served = ids[0] if ids else None
+        suites.append({"name": "model endpoint", "ok": bool(served),
+                       "detail": "serving {}".format(served) if served
+                       else "reachable but serving no model"})
+    except Exception as e:
+        suites.append({"name": "model endpoint", "ok": False,
+                       "detail": "unreachable at {} — {}".format(
+                           VLLM_URL, type(e).__name__)})
+
+    # A pinned model that the server is not serving is the silent killer: vLLM
+    # serves one model and 404s any other name, so every generation fails at
+    # the door with nothing in the UI to explain it.
+    if served and MODEL_ENV and MODEL_ENV != served:
+        suites.append({"name": "model name matches", "ok": False,
+                       "detail": "pinned {!r} but server serves {!r}".format(
+                           MODEL_ENV, served)})
+    elif served:
+        suites.append({"name": "model name matches", "ok": True,
+                       "detail": "no stale pin"})
+
+    if served:
+        try:
+            body = json.dumps({"model": served,
+                               "messages": [{"role": "user", "content": "ok"}],
+                               "max_tokens": 1, "stream": False}).encode()
+            req = urllib.request.Request(VLLM_URL, data=body, headers=_headers())
+            t0 = time.time()
+            with urllib.request.urlopen(req, timeout=45) as r:
+                json.loads(r.read())
+            suites.append({"name": "generation round-trip", "ok": True,
+                           "detail": "{:.1f}s for 1 token".format(time.time() - t0)})
+        except Exception as e:
+            detail = "{}: {}".format(type(e).__name__, e)
+            try:
+                detail = e.read().decode(errors="replace")[:200]
+            except Exception:
+                pass
+            suites.append({"name": "generation round-trip", "ok": False,
+                           "detail": detail})
+
     ok = all(x["ok"] for x in suites)
     passed = sum(1 for x in suites if x["ok"])
+    code_bad = [x["name"] for x in suites[:5] if not x["ok"]]
+    live_bad = [x["name"] for x in suites[5:] if not x["ok"]]
     return {"ok": ok, "suites": suites,
             "summary": "{}/{} checks pass".format(passed, len(suites)),
+            "code_ok": not code_bad, "live_ok": not live_bad,
             "version": VERSION}
 
 
@@ -1144,8 +1199,8 @@ footer a{color:var(--accent);text-decoration:none}
     </div>
     <p class="hnote" id="hnote_d" hidden></p>
     <div class="row">
-      <button id="selftest" class="ghost">Run self-test</button>
-      <span class="hint" id="selftestout">Runs both unit suites and a served-JS check before you spend a run.</span>
+      <button id="dselftest" class="ghost">Run self-test</button>
+      <span class="hint" id="dselftestout">Runs both unit suites and a served-JS check before you spend a run.</span>
     </div>
     <div class="row">
       <button id="draftgo">Draft the form &#8594;</button>
@@ -1198,9 +1253,11 @@ footer a{color:var(--accent);text-decoration:none}
   <textarea id="cons" class="short" placeholder="e.g. Three.js only; must run in a phone browser; no external assets"></textarea>
   <label class="lbl" for="bounds">Hard boundaries (never cross) <span class="opt">optional</span></label>
   <textarea id="bounds" class="short" placeholder="e.g. local only — no deploys, no domains, nothing live; don't touch prod; no paid APIs"></textarea>
+  <p class="hint" id="selftestout" hidden></p>
   <div class="row">
     <button id="go">Generate</button>
     <button id="stop" class="ghost" hidden>Stop</button>
+    <button id="selftest" class="ghost">Run self-test</button>
     <span class="hint">⌘↵ / Ctrl↵ to submit</span>
   </div>
   <div class="hint anatomy">A Gauntlet Loop prompt = <b>The Task</b> (what) → <b>The Build Method</b> (how) → <b>The Bar</b> (when to stop).<br>
@@ -1514,18 +1571,21 @@ $('wtype').addEventListener('change',autoBaseline);
    because two shipped regressions were invisible to Python syntax checks —
    a harness coerced to the wrong value, and a client-side function declared
    inside another so its call site threw and ate the result. */
-$('selftest').addEventListener('click',async()=>{
-  const b=$('selftest'),o=$('selftestout');
-  b.disabled=true;o.textContent='Running…';o.style.color='';
+async function runSelfTest(){
+  const btns=['selftest','dselftest'].map(i=>$(i)).filter(Boolean);
+  const outs=['selftestout','dselftestout'].map(i=>$(i)).filter(Boolean);
+  const say=(t,c)=>outs.forEach(o=>{o.hidden=false;o.textContent=t;o.style.color=c||''});
+  btns.forEach(b=>b.disabled=true);say('Running…');
   try{
     const r=await fetch('/api/selftest');const j=await r.json();
     const bad=(j.suites||[]).filter(x=>!x.ok);
-    o.style.color=j.ok?'var(--ok,#22c55e)':'var(--bad,#ef4444)';
-    o.textContent=(j.ok?'PASS — ':'FAIL — ')+j.summary+
-      (bad.length?': '+bad.map(x=>x.name+' ('+x.detail+')').join('; '):'');
-  }catch(e){o.style.color='var(--bad,#ef4444)';o.textContent='self-test could not run: '+e.message}
-  finally{b.disabled=false}
-});
+    say((j.ok?'PASS — ':'FAIL — ')+j.summary+
+        (bad.length?': '+bad.map(x=>x.name+' ('+x.detail+')').join('; '):''),
+        j.ok?'var(--ok,#22c55e)':'var(--bad,#ef4444)');
+  }catch(e){say('self-test could not run: '+e.message,'var(--bad,#ef4444)')}
+  finally{btns.forEach(b=>b.disabled=false)}
+}
+['selftest','dselftest'].forEach(i=>{const b=$(i);if(b)b.addEventListener('click',runSelfTest)});
 $('baseline').addEventListener('change',()=>{baselineTouched=true;$('dbaseline').checked=$('baseline').checked});
 $('dbaseline').addEventListener('change',()=>{baselineTouched=true;$('baseline').checked=$('dbaseline').checked});
 $('statuspage').addEventListener('change',()=>{$('dstatuspage').checked=$('statuspage').checked});

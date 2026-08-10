@@ -235,8 +235,14 @@ That last assertion is not decoration: a client-side function once ended up decl
 its call site throw and silently discarded a completed generation. See
 [issue-002-streaming-result-loss.md](docs/issue-002-streaming-result-loss.md).
 
+It also checks the model behind the prompting: that the endpoint is reachable, that a
+pinned model name matches what the server actually serves, and that a one-token generation
+round-trips. `code_ok` and `live_ok` are reported separately, so "your model is down" never
+looks like "your code is broken".
+
 ```bash
 python3 test_units.py && python3 test_logic.py    # 167 checks, or use the button
+curl -s localhost:7332/api/selftest | python3 -m json.tool
 ```
 
 ### Baseline sanity check

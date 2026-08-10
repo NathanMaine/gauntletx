@@ -88,6 +88,10 @@ where its call site can see it.
 
 Run it before spending a long generation.
 
+**v0.2.13** extended it past the code: the endpoint also confirms the model backend is
+reachable, that a pinned model name matches what is actually served, and that a one-token
+generation round-trips — reporting `code_ok` and `live_ok` separately.
+
 ## Verification
 
 - `run_selftest()` returns 5/5 in-process and over HTTP.
