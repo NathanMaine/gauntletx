@@ -3,6 +3,27 @@
 Notable changes, newest first. The image tag carries the version, so what
 `/api/version` reports is what this file explains.
 
+## 0.2.7 — 2026-08-09
+
+Credit and attribution. The UI footer and the README's Method & credit section
+now link this repo alongside Matt Shumer's method, and the credit section says
+plainly what the tool adds on top of the idea: a hand-written Gauntlet Loop
+prompt is only as good as the bar you happened to think of that day, and has to
+be re-adapted by hand for each harness. gauntletx picks a bar the agent cannot
+argue with and emits phrasing matched to what each of thirteen targets can
+actually do.
+
+Versioned rather than slipped in silently because the footer is served content,
+and this project's rule is that what `/api/version` reports is what the
+CHANGELOG explains.
+
+### Changed
+
+- UI footer: adds a `gauntletx on GitHub ↗` link after the method link.
+- `README.md`: Method & credit links `NathanMaine/gauntletx` and
+  `github.com/NathanMaine` after Matt Shumer's, with the free-form-prompting
+  comparison stated explicitly.
+
 ## 0.2.6 — 2026-08-09
 
 Thirteenth harness target: **Antigravity**, Google's agent-first IDE and CLI.

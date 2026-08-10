@@ -507,7 +507,17 @@ three-part prompt anatomy (Task / Build Method / Bar) behind Claude of Duty,
 and it's a good one. The meta-prompt is his; read
 [How to Run a Gauntlet Loop](https://somethingbig.ai/gauntlet-loop).
 
-**GauntletX — this repo — is Nathan Maine's work.** The idea is the easy part.
+**GauntletX — [this repo](https://github.com/NathanMaine/gauntletx) — is
+[Nathan Maine's](https://github.com/NathanMaine) work.** The method tells you
+what a good prompt looks like; the tool is what makes you actually get one. A
+hand-written Gauntlet Loop prompt is only as good as the bar you happened to
+think of that day, and it has to be re-adapted by hand for every harness.
+GauntletX picks a bar the agent can't argue with, then emits phrasing matched
+to what the target tool can genuinely do across thirteen of them — which is a
+categorical step up from free-form prompting, where the usual failure isn't a
+bad idea but a vague bar and a closer the harness cannot honour.
+
+The idea is the easy part.
 What this repo actually contains is:
 
 - **The diagnosis** — discovering, through live iteration, how a local model
