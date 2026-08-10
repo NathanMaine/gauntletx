@@ -1281,8 +1281,18 @@ button.resub{background:var(--accent);color:#fff;white-space:nowrap}
 .hitem:hover{border-color:var(--accent)}
 .hq{font-size:13.5px}.hm{color:var(--muted);font-size:12px;margin-top:2px}
 footer{color:var(--muted);font-size:12.5px;margin-top:34px;border-top:1px solid var(--line);
-  padding-top:14px;line-height:1.8}
+  padding-top:14px;line-height:1.7}
 footer a{color:var(--accent);text-decoration:none}
+footer a:hover{text-decoration:underline}
+/* Two groups, deliberately separated: who made this (stable) above what it is
+   running against (changes per deployment). Previously one dot-separated run,
+   which mixed attribution with runtime state and buried the endpoint. */
+.fgrid{display:flex;flex-wrap:wrap;gap:6px 18px;align-items:baseline}
+.frun{display:flex;flex-wrap:wrap;gap:4px 16px;margin-top:6px;opacity:.85}
+.frun span{white-space:nowrap}
+.flabel{text-transform:uppercase;letter-spacing:.06em;font-size:10.5px;
+  opacity:.65;margin-right:5px}
+.fwarn{color:var(--bad,#ef4444)}
 </style></head><body><div class="wrap">
 <header><span class="logo">🧤</span><div><h1>gauntletx</h1>
 <p class="sub">Turns a goal into a ready-to-paste Gauntlet Loop prompt · the method behind Claude of Duty</p></div>
@@ -1453,10 +1463,19 @@ footer a{color:var(--accent);text-decoration:none}
   <div id="hlist"></div>
 </div>
 
-<footer><b>gauntletx v__VERSION__</b> by <a href="https://github.com/NathanMaine/gauntletx"
- rel="noopener"><b>Nathan Maine</b> ↗</a> · <span id="fmodel">…</span><br>
-<a href="https://github.com/NathanMaine/gauntletx" rel="noopener">github.com/NathanMaine/gauntletx ↗</a>
- · Method: <a href="https://somethingbig.ai/gauntlet-loop" rel="noopener">Matt Shumer's Gauntlet Loop ↗</a></footer>
+<footer>
+  <div class="fgrid">
+    <span><b>gauntletx v__VERSION__</b></span>
+    <span>by <a href="https://github.com/NathanMaine/gauntletx" rel="noopener"><b>Nathan Maine</b> ↗</a></span>
+    <span><a href="https://github.com/NathanMaine/gauntletx" rel="noopener">github.com/NathanMaine/gauntletx ↗</a></span>
+    <span>method <a href="https://somethingbig.ai/gauntlet-loop" rel="noopener">Matt Shumer's Gauntlet Loop ↗</a></span>
+  </div>
+  <div class="frun">
+    <span><span class="flabel">model</span><span id="fmodel">…</span></span>
+    <span><span class="flabel">endpoint</span><span id="fendpoint" title="">…</span></span>
+    <span id="fwarn" class="fwarn" hidden>&#9888; unreachable</span>
+  </div>
+</footer>
 
 <script>
 const $=i=>document.getElementById(i);
@@ -1467,9 +1486,15 @@ $('tb').onclick=()=>{const c=document.documentElement.getAttribute('data-theme')
 const th=localStorage.getItem('gx_theme');if(th)document.documentElement.setAttribute('data-theme',th);
 
 fetch('/api/version').then(r=>r.json()).then(j=>{
-  $('fmodel').textContent=(j.model||'model: auto-discover')+' · '+j.vllm_url+
-    (j.vllm_reachable?'':' · ⚠ vLLM unreachable');
-}).catch(()=>{$('fmodel').textContent='version lookup failed'});
+  $('fmodel').textContent=j.model||'auto-discover';
+  /* show host:port — the /v1/chat/completions tail is noise and made the line
+     wrap; the full URL stays available on hover and for copy */
+  let ep=j.vllm_url||'';
+  try{const u=new URL(ep);ep=u.host}catch(e){}
+  $('fendpoint').textContent=ep||'—';
+  $('fendpoint').title=j.vllm_url||'';
+  $('fwarn').hidden=!!j.vllm_reachable;
+}).catch(()=>{$('fmodel').textContent='version lookup failed';$('fendpoint').textContent='—'});
 
 /* Same tolerant parser as the server: split on ### BAR/WHY/PROMPT/NOTES
    headings; a reply that ignores the format falls back to a raw card. */

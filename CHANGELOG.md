@@ -3,6 +3,25 @@
 Notable changes, newest first. The image tag carries the version, so what
 `/api/version` reports is what this file explains.
 
+## 0.3.3 — 2026-08-10
+
+Footer layout. 0.3.2 added the credit link but left everything on two dot-run
+lines, which mixed attribution with runtime state and let a full
+`http://host:8000/v1/chat/completions` dominate the first line.
+
+Now two deliberate groups: **who made this** (stable — version, author, repo,
+method) above **what it is running against** (changes per deployment — model and
+endpoint, labelled, slightly dimmed).
+
+### Changed
+
+- The endpoint shows `host:port`; the `/v1/chat/completions` tail was noise and
+  forced a wrap. The full URL stays on the element's `title` for hover and copy.
+- Unreachability is its own element rather than a string appended to the model
+  name, so a model id and a warning can no longer be mistaken for one value.
+- Flex with `flex-wrap` on both rows, so narrow windows wrap between items
+  instead of mid-URL.
+
 ## 0.3.2 — 2026-08-10
 
 Footer credit. The author name is now a link to the repo, the repo URL is shown
