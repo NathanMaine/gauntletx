@@ -3,6 +3,46 @@
 Notable changes, newest first. The image tag carries the version, so what
 `/api/version` reports is what this file explains.
 
+## 0.2.10 — 2026-08-10
+
+**Fixes a regression in 0.2.8 that 0.2.9 made unavoidable.** On the streaming
+door, a completed generation would render nothing: the prompt vanished, the
+Generate button stayed disabled, and no history entry was written. Inputs
+remained on screen, so it looked like the run had been thrown away.
+
+Two mistakes, both mine:
+
+1. `applyBaselineContract` was declared **inside** `applyStatusContract` — the
+   0.2.8 patch anchored on a line within its `for` loop — so the top-level call
+   site hit `ReferenceError: applyBaselineContract is not defined`.
+2. It called `sectionHeads()`, a helper that does not exist, and matched
+   `'prompt'` in lowercase where the parser emits `'PROMPT'`.
+
+The JavaScript was syntactically valid throughout, which is why nothing caught
+it. The throw happened after the stream completed and skipped the render, the
+history push and the button re-enable in one go.
+
+0.2.8 shipped this latent — it only fires when the baseline toggle is on, and in
+0.2.8 the toggle was opt-in and off by default. **0.2.9's auto-apply for
+`Backend or code` turned a dormant bug into a certainty** for the most common
+work type.
+
+### Fixed
+
+- Both contracts now go through one top-level `appendToPromptSection(raw,text)`;
+  `applyStatusContract` and `applyBaselineContract` are one-line wrappers. The
+  duplicated span surgery that made the mistake possible is gone.
+- The client-side appends are wrapped in `try/catch`. A failed append now
+  degrades to "no append" and surfaces as a lint warning — never to "no result".
+
+### Verified
+
+- The served JS is extracted and checked with `node --check`, then the contract
+  functions are executed in node against a realistic `### PROMPT` payload:
+  both defined at top level, text inserted inside the prompt section, `### NOTES`
+  preserved, both contracts ordered correctly, unparseable raw passed through.
+  Syntax checking alone would not have caught this — the bug was scoping.
+
 ## 0.2.9 — 2026-08-10
 
 Makes the v0.2.8 baseline contract discoverable and mostly automatic.

@@ -1197,7 +1197,12 @@ function parseSections(raw){
 const STATUS_CONTRACT=__STATUS_CONTRACT__;
 const BASELINE_CONTRACT=__BASELINE_CONTRACT__;
 const BASE_HINT='Any score must be printed beside a constant-predictor score and the label distribution — catches a metric that looks perfect but means nothing.';
-function applyStatusContract(raw){
+function appendToPromptSection(raw,text){
+  /* Shared span surgery: insert `text` at the end of the ### PROMPT section.
+     Unparseable raw passes through untouched, same as the server's door.
+     Both contracts go through here — 0.2.8 duplicated this logic, nested the
+     copy inside applyStatusContract by mistake, and called a helper that did
+     not exist, so the baseline append threw and ate the whole result. */
   const re=/^###[ \t]*(BAR|WHY|PROMPT|NOTES)\b[^\n]*$/gim;
   const heads=[];let m;
   while((m=re.exec(raw))!==null)heads.push({k:m[1].toUpperCase(),e:m.index+m[0].length,s:m.index});
@@ -1208,21 +1213,12 @@ function applyStatusContract(raw){
     if(!core)return raw;
     const lead=body.slice(0,body.length-body.replace(/^\s+/,'').length);
     const trail=body.slice(body.replace(/\s+$/,'').length);
-    return raw.slice(0,heads[i].e)+lead+core+'\n\n'+STATUS_CONTRACT+trail+raw.slice(end);
+    return raw.slice(0,heads[i].e)+lead+core+'\n\n'+text+trail+raw.slice(end);
   }
-  function applyBaselineContract(raw){
-    /* same span surgery, baseline contract; no (web) exclusion */
-    const heads=sectionHeads(raw); const i=heads.findIndex(h=>h.k==='prompt');
-    if(i<0)return raw;
-    const end=(i+1<heads.length)?heads[i+1].s:raw.length;
-    const body=raw.slice(heads[i].e,end); const core=body.trim();
-    if(!core)return raw;
-    const lead=body.slice(0,body.length-body.replace(/^\s+/,'').length);
-    const trail=body.slice(body.replace(/\s+$/,'').length);
-    return raw.slice(0,heads[i].e)+lead+core+'\n\n'+BASELINE_CONTRACT+trail+raw.slice(end);
-  }
-  return raw; /* unparseable raw passes through, same as the server */
+  return raw;
 }
+function applyStatusContract(raw){return appendToPromptSection(raw,STATUS_CONTRACT)}
+function applyBaselineContract(raw){return appendToPromptSection(raw,BASELINE_CONTRACT)}
 
 let ctrl=null,running=false,lastRaw='';
 function setRunning(on){running=on;$('go').disabled=on;$('resub').disabled=on;$('stop').hidden=!on}
@@ -1338,8 +1334,15 @@ async function run(){
   $('tspin').style.display='none';$('livebox').hidden=true;
   /* v0.2.3: deterministic client-side append on a COMPLETE generation only —
      a truncated or stopped prompt never gets a contract stapled to it */
-  if(wantContract&&content&&gotDone&&!streamErr&&!aborted)content=applyStatusContract(content);
-  if(wantBaseline&&content&&gotDone&&!streamErr&&!aborted)content=applyBaselineContract(content);
+  /* guarded: a throw here used to skip the render and leave the button
+     disabled with the prompt gone. A failed append must degrade to "no
+     append", never to "no result". */
+  if(content&&gotDone&&!streamErr&&!aborted){
+    try{
+      if(wantContract)content=applyStatusContract(content);
+      if(wantBaseline)content=applyBaselineContract(content);
+    }catch(e){lintWarn=(lintWarn?lintWarn+' ':'')+'contract append failed: '+e.message}
+  }
   if(streamErr&&!content)showError(streamErr);
   else{
     if(streamErr)showError(streamErr+' — showing what arrived before the failure');
