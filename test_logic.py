@@ -164,6 +164,24 @@ check("baseline raw door unparseable", G._baseline_contract_raw("no headings", T
 both = G._baseline_contract_raw(G._status_contract_raw(RAW, "Codex", True), True)
 check_true("both doors, status first", both.index(G.STATUS_CONTRACT) < both.index(G.BASELINE_CONTRACT))
 
+# ------------------------------------------------------- method contract
+check_true("method contract appended for agentic", G.METHOD_CONTRACT in
+           G.apply_method_contract("Do it.", "Codex"))
+check("method contract skipped for web",
+      G.apply_method_contract("Do it.", "Claude (web)"), "Do it.")
+check("method contract no prompt", G.apply_method_contract("", "Codex"), "")
+check("method contract None", G.apply_method_contract(None, "Codex"), None)
+mr = G._method_contract_raw(RAW, "Antigravity")
+check_true("method raw door inserts", G.METHOD_CONTRACT in mr)
+check_true("method raw door inside prompt section",
+           mr.index(G.METHOD_CONTRACT) < mr.index("### NOTES"))
+check("method raw door web-gated", G._method_contract_raw(RAW, "Grok (web)"), RAW)
+check("method raw door unparseable", G._method_contract_raw("no headings", "Codex"), "no headings")
+check_true("method contract forbids frameworks",
+           "never build an agent framework" in G.METHOD_CONTRACT)
+check_true("method contract forbids key requests",
+           "never ask for an API key" in G.METHOD_CONTRACT)
+
 # ------------------------------------------------------ sanitize_overrides
 def _ok(raw):
     ov, err = G.sanitize_overrides(raw)

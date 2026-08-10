@@ -3,6 +3,48 @@
 Notable changes, newest first. The image tag carries the version, so what
 `/api/version` reports is what this file explains.
 
+## 0.3.1 — 2026-08-10
+
+**`METHOD_CONTRACT`** — builders and critics are how the agent works, never
+something it builds.
+
+An Antigravity run spent an hour writing `factory_orchestrator.py` against a
+cloud SDK and then stopped to ask for a `GEMINI_API_KEY`, because it had no
+callable sub-agent tool and no instruction telling it what to do instead. Its
+plan was self-aware and it asked rather than guessing — the gap was ours: the
+prompt says "fan out sub-agents" and never said what to do when the harness has
+no such facility.
+
+Appended unconditionally for non-(web) targets. A (web) prompt already describes
+in-conversation rounds, so the clause would be noise there.
+
+### Fixed — an inaccurate capability claim
+
+`SYSTEM_PROMPT` and the Antigravity hint both asserted that its main agent
+"clones itself into parallel sub-agents". That came from product copy, and a real
+run reported *no* `invoke_subagent` tool in its environment. Both now say the
+fan-out may be automatic rather than callable, and the hint warns that if the
+agent asks to build an orchestrator or wants a `GEMINI_API_KEY`, the answer is no.
+
+### Why a contract and not an instruction
+
+The first attempt was a sentence in `SYSTEM_PROMPT`. **It did not survive**: the
+emitted prompt came out at 188 words against a stated 80–180 ceiling and the
+model dropped the new clause. Verified by generating and grepping, not by
+reading the diff.
+
+That is the third time this distinction has decided a design here — advice
+competes for budget and attention, a deterministic append does not. See
+`docs/issue-001-degenerate-metric.md` for the structure-vs-behaviour half of the
+same lesson.
+
+### Added
+
+- `METHOD_CONTRACT`, `apply_method_contract(prompt, harness)`,
+  `_method_contract_raw`, the client-side `applyMethodContract` for the
+  streaming door, and the CLI printer tail.
+- `test_logic.py` → **124 checks**; 215 across both suites.
+
 ## 0.3.0 — 2026-08-10
 
 **Config page.** A ⚙ panel at the bottom of the first tab sets which model

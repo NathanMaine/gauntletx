@@ -147,10 +147,11 @@ THE PROMPT YOU WRITE — exactly three parts, as plain flowing paragraphs, no he
    and sub-agents it can delegate to, but no /loop and no ultracode, and the model
    behind it is whichever provider the user has configured, so never assume a
    frontier model's headroom. For Antigravity, end with that same sentence, 'Use
-   sub-agents heavily and keep iterating continuously.' — Antigravity's main agent
-   decomposes a task and clones itself into parallel sub-agents, but it has no /loop
-   and no ultracode, and it defaults to a flash-tier Gemini model, so never assume a
-   frontier model's headroom. For a local-model or API-model target (Qwen3 Coder Next, Qwen 3.8,
+   sub-agents heavily and keep iterating continuously.' — Antigravity decomposes work
+   across parallel sub-agents, but that fan-out may be automatic rather than callable as
+   a tool, so the prompt must leave room for the agent to run the rounds itself across
+   turns instead; it has no /loop and no ultracode, and it defaults to a flash-tier
+   Gemini model, so never assume a frontier model's headroom. For a local-model or API-model target (Qwen3 Coder Next, Qwen 3.8,
    DeepSeek V4 Flash, Qwen 3.8 Max (API)), the prompt will be run by an agentic CLI
    driving that model:
    end with the sentence 'Run builders and critics as separate sessions with fresh
@@ -797,6 +798,49 @@ STATUS_CONTRACT = (
     "good news is wrong. Update the page every working turn.")
 
 
+METHOD_CONTRACT = (
+    "Use whatever sub-agent facility your harness actually gives you. If it has none, "
+    "run the rounds yourself across turns instead — never build an agent framework, "
+    "orchestrator or SDK integration to do it, and never ask for an API key in order to "
+    "spawn agents. Builders and critics are how you work, not something you construct.")
+
+
+def apply_method_contract(prompt, harness):
+    """Append METHOD_CONTRACT. Unconditional for non-(web) targets — this is a
+    method invariant, not an option, so there is no toggle.
+
+    Added in 0.3.1 after an Antigravity run spent an hour writing a
+    `factory_orchestrator.py` against a cloud SDK and then asked for an API key,
+    because it had no callable sub-agent tool and no instruction saying what to
+    do instead. A (web) prompt already describes in-conversation rounds, so the
+    clause would be noise there.
+
+    First attempt at this was a sentence in SYSTEM_PROMPT. It did not survive:
+    the emitted prompt hit 188 words against a stated 80-180 ceiling and the
+    model dropped the new clause. Advice competes for budget; a contract does
+    not."""
+    if is_web_harness(harness) or not (prompt or "").strip():
+        return prompt
+    return prompt.rstrip() + "\n\n" + METHOD_CONTRACT
+
+
+def _method_contract_raw(raw, harness):
+    """Reflected into raw's ### PROMPT section so raw and prompt agree."""
+    if is_web_harness(harness):
+        return raw
+    span = _prompt_span(raw)
+    if not span:
+        return raw
+    s_, e_ = span
+    body = raw[s_:e_]
+    core = body.strip()
+    if not core:
+        return raw
+    lead = body[:len(body) - len(body.lstrip())]
+    trail = body[len(body.rstrip()):]
+    return raw[:s_] + lead + apply_method_contract(core, harness) + trail + raw[e_:]
+
+
 BASELINE_CONTRACT = (
     "The evaluation harness must print, on the same line as any score it "
     "reports: the model's score, the score of a constant predictor that "
@@ -921,6 +965,7 @@ def generate_blocking(goal, mode, work_type, references, constraints, boundaries
             raw2, _fixed2, lint2 = harden_output(raw2, harness)
             if not lint2:
                 raw, reasoning, lint = raw2, reasoning2, None
+    raw = _method_contract_raw(raw, harness)
     raw = _status_contract_raw(raw, harness, status_page)
     raw = _baseline_contract_raw(raw, baseline_check)
     s = parse_sections(raw)
@@ -1448,6 +1493,7 @@ function parseSections(raw){
    the prompt card, history, and every copy action all agree. */
 const STATUS_CONTRACT=__STATUS_CONTRACT__;
 const BASELINE_CONTRACT=__BASELINE_CONTRACT__;
+const METHOD_CONTRACT=__METHOD_CONTRACT__;
 const BASE_HINT='Any score must be printed beside a constant-predictor score and the label distribution — catches a metric that looks perfect but means nothing.';
 function appendToPromptSection(raw,text){
   /* Shared span surgery: insert `text` at the end of the ### PROMPT section.
@@ -1471,6 +1517,7 @@ function appendToPromptSection(raw,text){
 }
 function applyStatusContract(raw){return appendToPromptSection(raw,STATUS_CONTRACT)}
 function applyBaselineContract(raw){return appendToPromptSection(raw,BASELINE_CONTRACT)}
+function applyMethodContract(raw){return appendToPromptSection(raw,METHOD_CONTRACT)}
 
 let ctrl=null,running=false,lastRaw='';
 function setRunning(on){running=on;$('go').disabled=on;$('resub').disabled=on;$('stop').hidden=!on}
@@ -1592,6 +1639,7 @@ async function run(){
      append", never to "no result". */
   if(content&&gotDone&&!streamErr&&!aborted){
     try{
+      if(!vals.harness.endsWith('(web)'))content=applyMethodContract(content);
       if(wantContract)content=applyStatusContract(content);
       if(wantBaseline)content=applyBaselineContract(content);
     }catch(e){lintWarn=(lintWarn?lintWarn+' ':'')+'contract append failed: '+e.message}
@@ -1631,7 +1679,7 @@ function updateHnotes(){
   else if(h==='Gemini CLI'){warn=true;
     txt='⚠ Gemini CLI was retired on 18 June 2026 and replaced by Antigravity CLI. Free, Google AI Pro and Ultra access ended that day; only Gemini Code Assist Standard/Enterprise licences still run it. Unless you hold one of those, pick Antigravity instead — the generated prompt is identical, both get the same sub-agent closer.';}
   else if(h==='Antigravity'){
-    txt='Antigravity’s main agent decomposes a task and clones itself into parallel sub-agents, so the prompt asks it to fan out and keep iterating — but there is no /loop and no ultracode. It defaults to a flash-tier Gemini model: strong at building, weaker as a critic. If the goal is visual, confirm the critic model accepts images before trusting a blind side-by-side.';}
+    txt='Antigravity fans work out across parallel sub-agents, but that may be automatic rather than a tool the agent can call — one run reported no invoke_subagent tool in its environment and offered to write an orchestrator instead. The prompt tells it to use whatever facility it has and otherwise run the rounds itself across turns; if it asks to build an agent framework or wants a GEMINI_API_KEY, say no. No /loop, no ultracode, and it defaults to a flash-tier Gemini model: strong at building, weaker as a critic.';}
   else if(h==='opencode'){
     txt='opencode delegates to sub-agents but has no /loop and no ultracode, so the prompt asks it to keep iterating rather than to loop. Quality tracks whichever provider you point it at, not opencode itself — a small local model will build fine and critique weakly. If the goal is visual, check the critic model accepts images: a text-only model cannot blind-compare screenshots and will fall back to reading its own source and calling it good.';}
   else if(h.endsWith('(local)')||h.endsWith('(API)')){
@@ -1947,6 +1995,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             body = (PAGE.replace("__VERSION__", VERSION)
                     .replace("__STATUS_CONTRACT__", json.dumps(STATUS_CONTRACT))
                     .replace("__BASELINE_CONTRACT__", json.dumps(BASELINE_CONTRACT))
+                    .replace("__METHOD_CONTRACT__", json.dumps(METHOD_CONTRACT))
                     .encode())
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -2279,6 +2328,8 @@ def run_cli(args):
                          "streamed --raw output — use --no-stream --raw for "
                          "raw output with the contract in place\n")
     _tail = []
+    if not is_web_harness(harness):
+        _tail.append(METHOD_CONTRACT)
     if status_page:
         _tail.append(STATUS_CONTRACT)
     if baseline_check:
