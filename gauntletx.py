@@ -717,6 +717,54 @@ STATUS_CONTRACT = (
     "good news is wrong. Update the page every working turn.")
 
 
+BASELINE_CONTRACT = (
+    "The evaluation harness must print, on the same line as any score it "
+    "reports: the model's score, the score of a constant predictor that "
+    "always emits the single most frequent label or answer, the score of a "
+    "random predictor, and the label distribution of both the training and "
+    "the evaluation split. A harness that cannot print all five of those is "
+    "incomplete and is not finished. Treat a model that does not beat the "
+    "constant predictor as a failed round — that round is spent finding out "
+    "why the metric is degenerate, not improving the model. If either split "
+    "collapses to a single label, stop and fix the labelling first.")
+
+
+def apply_baseline_contract(prompt, flag):
+    """Deterministically append BASELINE_CONTRACT to a finished prompt.
+
+    No harness gate, unlike apply_status_contract: reporting a baseline
+    alongside a score needs no filesystem, so a (web) chat target can do it
+    as well as a CLI can.
+
+    Worded as a property of the ARTIFACT ("the harness must print...") rather
+    than a behaviour ("report baselines each round") on purpose. The
+    2026-08-09 run had STATUS_CONTRACT applied and followed every structural
+    clause in it (auto-refresh meta, stat cards, piece table, activity log)
+    while ignoring every behavioural one (real timestamps, update every turn,
+    record failures). Structure is complied with; sustained behaviour is not."""
+    if not flag or not (prompt or "").strip():
+        return prompt
+    return prompt.rstrip() + "\n\n" + BASELINE_CONTRACT
+
+
+def _baseline_contract_raw(raw, flag):
+    """The same append reflected inside raw's ### PROMPT section, so `raw` and
+    the parsed `prompt` field never disagree. Mirrors _status_contract_raw."""
+    if not flag:
+        return raw
+    span = _prompt_span(raw)
+    if not span:
+        return raw
+    s_, e_ = span
+    body = raw[s_:e_]
+    core = body.strip()
+    if not core:
+        return raw
+    lead = body[:len(body) - len(body.lstrip())]
+    trail = body[len(body.rstrip()):]
+    return raw[:s_] + lead + apply_baseline_contract(core, flag) + trail + raw[e_:]
+
+
 def apply_status_contract(prompt, harness, flag):
     """Deterministically append STATUS_CONTRACT to a finished prompt.
     Returns the prompt unchanged unless the flag is on, the harness is a
@@ -771,7 +819,7 @@ def call_blocking(user_msg, system_prompt):
 
 
 def generate_blocking(goal, mode, work_type, references, constraints, boundaries, harness,
-                      status_page=False):
+                      status_page=False, baseline_check=False):
     """One non-streamed round trip. Returns (result dict, None) or (None, err).
     The dict always carries `raw`; the parsed fields are None when the model
     ignored the output format — the caller still gets everything it said.
@@ -794,6 +842,7 @@ def generate_blocking(goal, mode, work_type, references, constraints, boundaries
             if not lint2:
                 raw, reasoning, lint = raw2, reasoning2, None
     raw = _status_contract_raw(raw, harness, status_page)
+    raw = _baseline_contract_raw(raw, baseline_check)
     s = parse_sections(raw)
     out = {"bar": s.get("bar"), "why": s.get("why"), "prompt": s.get("prompt"),
            "notes": s.get("notes"), "raw": raw,
@@ -1001,6 +1050,7 @@ footer a{color:var(--accent);text-decoration:none}
     </div>
     <div class="row">
       <label class="chk"><input type="checkbox" id="dstatuspage"> Structured status page (progress.html)</label>
+      <label class="chk"><input type="checkbox" id="dbaseline"> Degenerate-baseline check (constant + random + label distribution)</label>
       <span class="hint" id="dstatushint">Appends a fixed page contract to the prompt — auto-refreshing, real timestamps, no simulation.</span>
     </div>
     <p class="hnote" id="hnote_d" hidden></p>
@@ -1044,6 +1094,7 @@ footer a{color:var(--accent);text-decoration:none}
   </div>
   <div class="row">
     <label class="chk"><input type="checkbox" id="statuspage"> Structured status page (progress.html)</label>
+    <label class="chk"><input type="checkbox" id="baseline"> Degenerate-baseline check (constant + random + label distribution)</label>
     <span class="hint" id="statushint">Appends a fixed page contract to the prompt — auto-refreshing, real timestamps, no simulation.</span>
   </div>
   <p class="hnote" id="hnote_f" hidden></p>
@@ -1142,6 +1193,7 @@ function parseSections(raw){
    ### PROMPT section (same span surgery as the server's blocking door) so
    the prompt card, history, and every copy action all agree. */
 const STATUS_CONTRACT=__STATUS_CONTRACT__;
+const BASELINE_CONTRACT=__BASELINE_CONTRACT__;
 function applyStatusContract(raw){
   const re=/^###[ \t]*(BAR|WHY|PROMPT|NOTES)\b[^\n]*$/gim;
   const heads=[];let m;
@@ -1154,6 +1206,17 @@ function applyStatusContract(raw){
     const lead=body.slice(0,body.length-body.replace(/^\s+/,'').length);
     const trail=body.slice(body.replace(/\s+$/,'').length);
     return raw.slice(0,heads[i].e)+lead+core+'\n\n'+STATUS_CONTRACT+trail+raw.slice(end);
+  }
+  function applyBaselineContract(raw){
+    /* same span surgery, baseline contract; no (web) exclusion */
+    const heads=sectionHeads(raw); const i=heads.findIndex(h=>h.k==='prompt');
+    if(i<0)return raw;
+    const end=(i+1<heads.length)?heads[i+1].s:raw.length;
+    const body=raw.slice(heads[i].e,end); const core=body.trim();
+    if(!core)return raw;
+    const lead=body.slice(0,body.length-body.replace(/^\s+/,'').length);
+    const trail=body.slice(body.replace(/\s+$/,'').length);
+    return raw.slice(0,heads[i].e)+lead+core+'\n\n'+BASELINE_CONTRACT+trail+raw.slice(end);
   }
   return raw; /* unparseable raw passes through, same as the server */
 }
@@ -1175,7 +1238,7 @@ function resetPanes(){
    SUCCEEDS; any change vs the snapshot shows the stale banner near the
    results, and returning to the snapshot (or resubmitting) clears it.
    No snapshot (before first generation, after stop/error) = no banner. */
-const FORM_IDS=['goal','mode','wtype','harness','refs','cons','bounds','statuspage'];
+const FORM_IDS=['goal','mode','wtype','harness','refs','cons','bounds','statuspage','baseline'];
 let snap=null;
 /* checkbox-aware value read: the status-page toggle is part of the snapshot,
    so flipping it after a generation trips the stale banner like any field */
@@ -1221,10 +1284,11 @@ async function run(){
      generated this prompt, not a toggle flipped mid-run. False for (web)
      harnesses — a chat target can't write files. */
   const wantContract=vals.statuspage==='true'&&!vals.harness.endsWith('(web)');
+  const wantBaseline=vals.baseline==='true';
   const body={goal:goal,mode:vals.mode,work_type:vals.wtype,
     harness:vals.harness,references:vals.refs,
     constraints:vals.cons,boundaries:vals.bounds,
-    status_page:wantContract,stream:true};
+    status_page:wantContract,baseline_check:wantBaseline,stream:true};
   try{
     const r=await fetch('/api/generate',{method:'POST',
       headers:{'Content-Type':'application/json'},
@@ -1272,6 +1336,7 @@ async function run(){
   /* v0.2.3: deterministic client-side append on a COMPLETE generation only —
      a truncated or stopped prompt never gets a contract stapled to it */
   if(wantContract&&content&&gotDone&&!streamErr&&!aborted)content=applyStatusContract(content);
+  if(wantBaseline&&content&&gotDone&&!streamErr&&!aborted)content=applyBaselineContract(content);
   if(streamErr&&!content)showError(streamErr);
   else{
     if(streamErr)showError(streamErr+' — showing what arrived before the failure');
@@ -1332,6 +1397,8 @@ $('dharness').addEventListener('change',()=>{$('harness').value=$('dharness').va
    The Form-tab box is the FORM_IDS member, so its own change event already
    runs checkDirty; the Describe-tab box mirrors in and calls it by hand
    (programmatic .checked changes fire no events). */
+$('baseline').addEventListener('change',()=>{$('dbaseline').checked=$('baseline').checked});
+$('dbaseline').addEventListener('change',()=>{$('baseline').checked=$('dbaseline').checked});
 $('statuspage').addEventListener('change',()=>{$('dstatuspage').checked=$('statuspage').checked});
 $('dstatuspage').addEventListener('change',()=>{$('statuspage').checked=$('dstatuspage').checked;
   checkDirty()});
@@ -1511,6 +1578,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             # blocking-door append can never drift apart.
             body = (PAGE.replace("__VERSION__", VERSION)
                     .replace("__STATUS_CONTRACT__", json.dumps(STATUS_CONTRACT))
+                    .replace("__BASELINE_CONTRACT__", json.dumps(BASELINE_CONTRACT))
                     .encode())
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -1616,6 +1684,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         # performs the same deterministic append client-side from its
         # embedded copy of STATUS_CONTRACT.
         status_page = bool(p.get("status_page"))
+        baseline_check = bool(p.get("baseline_check"))
         err = validate_inputs(goal, references, constraints, boundaries)
         if err:
             self._json({"error": err}, 400)
@@ -1624,7 +1693,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if not p.get("stream"):
             result, err = generate_blocking(goal, mode, work_type, references,
                                             constraints, boundaries, harness,
-                                            status_page)
+                                            status_page, baseline_check)
             if err:
                 self._json({"error": err}, 502)
                 return
@@ -1796,6 +1865,7 @@ def run_cli(args):
     # v0.2.3 toggle. Same door policy as the API — ignored for a (web)
     # harness, never an error — but a CLI user asked explicitly, so say so.
     status_page = bool(args.status_page)
+    baseline_check = bool(args.baseline_check)
     if status_page and is_web_harness(harness):
         sys.stderr.write("gauntletx: warning: --status-page ignored — {} is a "
                          "chat target and can't write files\n".format(harness))
@@ -1807,7 +1877,7 @@ def run_cli(args):
     if args.no_stream:
         result, err = generate_blocking(goal, mode, args.type, args.refs,
                                         args.constraints, args.boundaries,
-                                        harness, status_page)
+                                        harness, status_page, baseline_check)
         if err:
             sys.exit("gauntletx: " + err)
         if result.get("lint"):
@@ -1832,7 +1902,12 @@ def run_cli(args):
         sys.stderr.write("gauntletx: note: --status-page has no effect on "
                          "streamed --raw output — use --no-stream --raw for "
                          "raw output with the contract in place\n")
-    printer = SectionStream(STATUS_CONTRACT if status_page else None)
+    _tail = []
+    if status_page:
+        _tail.append(STATUS_CONTRACT)
+    if baseline_check:
+        _tail.append(BASELINE_CONTRACT)
+    printer = SectionStream("\n\n".join(_tail) if _tail else None)
     parts = []
     reasoned = False
     saw_done = False
@@ -1935,6 +2010,12 @@ def main():
                          "'Qwen 3.8 (local)', 'DeepSeek V4 Flash (local)', 'Qwen 3.8 Max (API)', "
                          "'Claude (web)', 'ChatGPT (web)', "
                          "'Google Gemini (web)', or 'Grok (web)'")
+    ap.add_argument("--baseline-check", action="store_true",
+                    help="append the fixed degenerate-baseline contract: any "
+                         "score must be printed beside a constant-predictor "
+                         "score, a random-predictor score, and the label "
+                         "distribution of both splits. Applies to every "
+                         "harness, (web) included")
     ap.add_argument("--status-page", action="store_true",
                     help="append the fixed structured-status-page contract "
                          "(a single auto-refreshing progress.html with real "

@@ -193,6 +193,67 @@ Three changes, written to be pasted. Anchors are exact as of v0.2.4.
 
 ---
 
+## Update 2026-08-10 — findings 1 and 2 confirmed by a real run
+
+A run of this exact shape (opencode → KAT-Coder on the Spark) produced **100%
+accuracy against an 82% target** and the number was meaningless. Full write-up
+and reproducible evidence are held locally at
+`~/opencode_test_casestudy/` (`verify.py` re-derives every finding).
+
+What happened, in one line: a three-line `label_encode` compared full domain
+strings (`'SAFe 6.0'`) against short class names (`'SAFe'`), never matched, and
+returned `0` for every record. All 192 training and 49 holdout labels collapsed
+to one class; a constant predictor scores 100% on that. 39 tests passed and
+training loss decreased monotonically throughout.
+
+**Nothing was adversarial.** No gaming, no shortcut-seeking — a string
+comparison silently converted a real task into a trivial one and every
+downstream signal confirmed success. That is the strongest argument yet for
+finding 2: the danger is not a builder trying to cheat, it is a builder that
+cannot tell a degenerate metric from a real one.
+
+**Shipped in response:** `BASELINE_CONTRACT` (v0.2.8) — a deterministic append,
+same machinery as the status page, requiring any score to be printed beside a
+constant-predictor score, a random-predictor score, and the label distribution
+of both splits. One line of output would have caught this in round one.
+
+### Diff 4 (new) — the bar must not be authored by the builder
+
+The run created its own holdout inside the project, its own labels, its own
+metric and its own target. `/Users/nmaine/opencode_test_holdout/` — specified in
+the prompt, and protected by an opencode permission that **auto-rejects** reads
+from outside the project (verified) — stayed empty. Enforcement pointed at a
+directory nothing was ever put in.
+
+```diff
++- The builder must not author the bar. If the same agent creates the evaluation
++  set, defines the metric, and sets the target, the bar is decorative. State
++  where the evaluation data comes from and who put it there; if the prompt names
++  a location for it, forbid creating an alternative anywhere else.
+```
+
+### Diff 5 (new) — contracts constrain structure, not behaviour
+
+`STATUS_CONTRACT` **was applied** to that prompt. The model honoured every
+structural clause — auto-refresh meta, stat cards, piece table, append-only
+activity log — and ignored every behavioural one. It invented an 07:45–08:31
+activity log for a run that happened 22:04–23:20, never updated the page
+mid-run (57.7 minutes stale while code was actively being written), and logged
+no failures despite five visible ones.
+
+The lesson generalises beyond the status page: **write contract clauses as
+properties of the artifact, not as behaviours over time.** "The harness must
+print X" gets complied with; "report X every round" does not. `BASELINE_CONTRACT`
+is worded accordingly.
+
+A freshness gate is the remaining half:
+
+```diff
++- A round whose progress-page timestamp did not advance is a round that did not
++  happen. Any critic must fail it, and timestamps must be read from the clock at
++  write time — a log whose entries are evenly spaced was synthesised.
+```
+
 ## The cost of these diffs, stated honestly
 
 `SYSTEM_PROMPT` ends with **"80–180 words total"** for the emitted prompt. Diffs 1 and 2

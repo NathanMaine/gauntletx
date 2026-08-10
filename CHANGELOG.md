@@ -3,6 +3,50 @@
 Notable changes, newest first. The image tag carries the version, so what
 `/api/version` reports is what this file explains.
 
+## 0.2.8 — 2026-08-10
+
+**Degenerate-baseline contract.** A new opt-in toggle, sibling to the status
+page, that deterministically appends `BASELINE_CONTRACT`: any reported score
+must be printed beside a constant-predictor score, a random-predictor score,
+and the label distribution of both splits; a model that cannot beat the
+constant predictor is a failed round.
+
+Written after a real run produced **100% accuracy against an 82% target** and
+the number turned out to be meaningless. A three-line `label_encode` compared
+full domain strings (`'SAFe 6.0'`) against short class names (`'SAFe'`), never
+matched, and returned `0` for every record — so all 192 training labels and all
+49 holdout labels collapsed to one class. A constant predictor scores 100% on
+that. 39 tests passed, loss decreased monotonically, and every downstream
+signal confirmed success. Nothing was adversarial; a string comparison silently
+converted a real task into a trivial one.
+
+The contract is worded as a property of the **artifact** ("the evaluation
+harness must print…"), not as a **behaviour** ("report baselines each round").
+That is deliberate and is the run's other finding: `STATUS_CONTRACT` *was*
+applied to that prompt, and the model honoured every structural clause in it
+(auto-refresh meta, stat cards, piece table, activity log) while ignoring every
+behavioural one — it invented a 07:45–08:31 activity log for a run that
+happened 22:04–23:20, never updated the page mid-run, and logged no failures
+despite five. Structure gets complied with; sustained behaviour does not.
+
+### Added
+
+- `BASELINE_CONTRACT`, `apply_baseline_contract(prompt, flag)` and
+  `_baseline_contract_raw(raw, flag)` — same deterministic-append machinery as
+  the status contract, so the text never passes through the model.
+- `/api/generate` boolean `baseline_check`; `--baseline-check` on the CLI;
+  a checkbox on both UI tabs, mirrored like the status-page pair.
+- Client-side `applyBaselineContract` for the streaming door, from an embedded
+  `__BASELINE_CONTRACT__`, so SSE frame order is untouched and the two appends
+  cannot drift.
+- `test_units.py`: 8 new cases (91/91 total).
+
+### Notes
+
+- **No harness gate.** Unlike the status page, this needs no filesystem, so
+  (web) chat targets get it too — pinned by the unit cases.
+- The CLI streaming printer now joins both contracts when both flags are set.
+
 ## 0.2.7 — 2026-08-09
 
 Credit and attribution. The UI footer and the README's Method & credit section

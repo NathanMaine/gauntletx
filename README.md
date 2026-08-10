@@ -56,6 +56,7 @@ the job gauntletx does for you.
 | 🎭 **Thirteen targets** | Agentic CLIs — including **opencode** and **Antigravity** — plus local/API models and browser chats, each getting correctly adapted phrasing |
 | 🚧 **Hard boundaries** | "Local only, nothing deployed" becomes a rule critics enforce as an automatic fail |
 | 📊 **Live progress page** | Optional toggle appends a fixed `progress.html` contract — real timestamps, no invented history |
+| 🧪 **Degenerate-baseline check** | Optional toggle: any score must be printed beside a constant-predictor score, a random-predictor score, and both label distributions. A model that can't beat a constant is a failed round |
 | 🔒 **Fully local** | Your goal text never leaves the machine you point it at |
 
 ### Where you can paste it
@@ -220,6 +221,7 @@ python3 gauntletx.py --type writing --refs "PG's essays" "rewrite my launch post
 python3 gauntletx.py --harness Codex "..."                 # Codex phrasing (no ultracode)
 python3 gauntletx.py --harness opencode "..."              # opencode — sub-agents, no /loop, no ultracode
 python3 gauntletx.py --harness Antigravity "..."           # Google Antigravity — same closer as opencode/Codex
+python3 gauntletx.py --baseline-check "..."                # require constant/random baselines beside any score
 python3 gauntletx.py --harness "Qwen 3.8 (local)" "..."    # or "Gemini CLI", "Qwen3 Coder Next (local)", "DeepSeek V4 Flash (local)"
 python3 gauntletx.py --harness "ChatGPT (web)" "..."       # chat adaptation — or "Claude (web)", "Google Gemini (web)", "Grok (web)"
 python3 gauntletx.py --polish --boundaries "local only — nothing live" "raise my portfolio site to the bar"

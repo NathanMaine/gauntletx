@@ -13,7 +13,8 @@ canonical suite — extend it here, and keep the CHANGELOG count in sync.
 
 import sys
 
-from gauntletx import (HARNESSES, STATUS_CONTRACT, apply_status_contract,
+from gauntletx import (BASELINE_CONTRACT, HARNESSES, STATUS_CONTRACT,
+                       apply_baseline_contract, apply_status_contract,
                        coerce_harness)
 
 # Sanity: the roster the cases coerce onto, in UI <optgroup> order.
@@ -170,6 +171,24 @@ STATUS_CASES = [
 ]
 assert len(STATUS_CASES) == 12, "status case count drifted: %d" % len(STATUS_CASES)
 
+# 8 v0.2.8 cases: apply_baseline_contract. Deliberately NOT harness-gated —
+# unlike the status page, reporting a baseline beside a score needs no
+# filesystem, so a (web) chat target must get the contract too. The last two
+# pin the no-prompt guards.
+P = "Build the thing."
+B = P + "\n\n" + BASELINE_CONTRACT
+BASELINE_CASES = [
+    (P, True, B),                       # flag on -> appended
+    (P, False, P),                      # flag off -> untouched
+    ("  " + P + "  ", True, "  " + P + "\n\n" + BASELINE_CONTRACT),  # rstrip only
+    (B, True, B + "\n\n" + BASELINE_CONTRACT),  # idempotence NOT claimed; documents behaviour
+    ("", True, ""),                     # nothing to append to
+    ("   ", True, "   "),               # whitespace-only likewise
+    (None, True, None),                 # None passes through
+    (P, None, P),                       # falsy flag
+]
+assert len(BASELINE_CASES) == 8, "baseline case count drifted: %d" % len(BASELINE_CASES)
+
 
 def main():
     failures = []
@@ -196,6 +215,17 @@ def main():
                 "{!r}, want {!r}".format(prompt, harness, flag, got, want))
     print("apply_status_contract: {}/{} cases pass".format(
         len(STATUS_CASES) - (len(failures) - before), len(STATUS_CASES)))
+
+    before = len(failures)
+    for prompt, flag, want in BASELINE_CASES:
+        total += 1
+        got = apply_baseline_contract(prompt, flag)
+        if got != want:
+            failures.append(
+                "  [0.2.8-baseline] apply_baseline_contract({!r}, {!r}) = "
+                "{!r}, want {!r}".format(prompt, flag, got, want))
+    print("apply_baseline_contract: {}/{} cases pass".format(
+        len(BASELINE_CASES) - (len(failures) - before), len(BASELINE_CASES)))
 
     print("total: {}/{}".format(total - len(failures), total))
     if failures:
