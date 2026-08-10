@@ -3,6 +3,56 @@
 Notable changes, newest first. The image tag carries the version, so what
 `/api/version` reports is what this file explains.
 
+## 0.3.5 — 2026-08-10
+
+**Autonomy, stated rather than assumed.**
+
+The Gauntlet Loop's premise is that the agent runs unattended. Shumer is explicit:
+*"I did not sit there steering it, at all"* — one prompt, many hours, 55,000 lines,
+no interruption, no approval gates. And the line that matters most here:
+**"the architecture assumes the agent won't get blocked."**
+
+That assumption is a property of the *harness*, not of the prompt. It held for
+Claude Code with ultracode. It did not hold for either harness observed here:
+
+| Harness | What "won't get blocked" became |
+|---|---|
+| Antigravity (flash-tier Gemini, no sub-agent tool) | stopped four times for approval |
+| opencode (small local model) | never stopped, looped without progress, no score after an hour |
+
+gauntletx generalised the method to thirteen targets and inherited the assumption
+in silence. The Claude-of-Duty prompt has no autonomy clause either — its only
+stopping language is "don't stop until every sub-agent is wowed", which is about
+not stopping *early on quality*, not about not stopping *to ask*. It needed none.
+
+So this is not an extension of the method. It is the method's own assumption,
+written down for harnesses that do not satisfy it automatically.
+
+### Added to `METHOD_CONTRACT`
+
+- **Decide, do not ask.** Where the brief leaves a choice — metric,
+  hyperparameter, architecture, format — make it, record what you chose and why,
+  and carry on. No approval gates on decisions the agent was told to make.
+- **Stop only when genuinely blocked**, and then ask one specific question rather
+  than inventing a substitute.
+- **Stall detection.** Two rounds with no artifact changed and no score reported
+  is a stall: write the blocker, change approach.
+
+### Why judgement calls and missing preconditions are distinguished
+
+A blanket "never stop to ask" would be harmful. One observed stop was correct: a
+file the brief promised did not exist, and asking beat guessing — guessing is
+precisely the failure in issue #1, where a builder invented its own holdout. The
+clause therefore separates *deciding* from *proceeding without a precondition*,
+and permits exactly one kind of stop.
+
+Each clause ends in a written artifact — a recorded decision, a specific question,
+a blocker note — because behavioural clauses have a poor record here and a
+structural residue makes non-compliance visible.
+
+`test_logic.py` → **131 checks**; 222 across both suites. Verified surviving into
+a generated prompt, not merely present in the constant.
+
 ## 0.3.4 — 2026-08-10
 
 **Retry hygiene in `METHOD_CONTRACT`.** An observed run repeated one

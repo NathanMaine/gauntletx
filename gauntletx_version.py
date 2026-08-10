@@ -11,7 +11,7 @@ import pathlib
 
 # What this file shipped as, used only when the VERSION file is absent
 # (e.g. a bare copy of just the .py files). The file, when present, wins.
-_FALLBACK = "0.3.4"
+_FALLBACK = "0.3.5"
 
 
 def _read():

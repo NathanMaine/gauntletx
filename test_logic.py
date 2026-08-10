@@ -188,6 +188,22 @@ check_true("method contract caps retries",
            "fails twice with the same error" in G.METHOD_CONTRACT)
 check_true("method contract demands a written blocker",
            "into your notes on disk" in G.METHOD_CONTRACT)
+# Autonomy. The method assumes the agent will not get blocked — true of Claude
+# Code, false of a flash-tier IDE agent and of a small local model. Both observed
+# failures are covered: stopping for approval on a decision it was told to make,
+# and looping without progress. Judgement calls and missing preconditions are
+# deliberately distinguished: a blanket "never ask" would push an agent to invent
+# a holdout, which is the failure in issue #1.
+check_true("autonomy: decide, do not seek approval",
+           "do not stop for approval on anything you were told to decide" in G.METHOD_CONTRACT)
+check_true("autonomy: record the decision",
+           "record what you chose and why" in G.METHOD_CONTRACT)
+check_true("autonomy: stop only when blocked",
+           "Stop only when you cannot proceed" in G.METHOD_CONTRACT)
+check_true("autonomy: ask rather than substitute",
+           "rather than inventing a substitute" in G.METHOD_CONTRACT)
+check_true("autonomy: stall detection",
+           "treat that as a stall" in G.METHOD_CONTRACT)
 
 # ------------------------------------------------------ sanitize_overrides
 def _ok(raw):

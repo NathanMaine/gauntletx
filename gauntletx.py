@@ -806,7 +806,13 @@ METHOD_CONTRACT = (
     "If a command fails twice with the same error, do not run it a third time: write the "
     "command, the error, and what you will try instead into your notes on disk, then "
     "change approach. Repeating a failing command is how an unattended run burns hours "
-    "without moving.")
+    "without moving. Where the brief leaves a choice — a metric, a hyperparameter, an "
+    "architecture, a format — make it yourself, record what you chose and why, and carry "
+    "on; do not stop for approval on anything you were told to decide. Stop only when you "
+    "cannot proceed: something the brief said exists does not, or continuing would break a "
+    "stated constraint. Then ask one specific question rather than inventing a substitute. "
+    "And if two rounds pass with no artifact changed and no score reported, treat that as "
+    "a stall: write down what is blocking you and change approach.")
 
 
 def apply_method_contract(prompt, harness):
