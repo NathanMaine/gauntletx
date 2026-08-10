@@ -543,6 +543,17 @@ Stated plainly, because a tool that hides these is harder to trust:
 
 MIT — see [LICENSE](LICENSE).
 
+## Issue log
+
+Every defect found and fixed is logged as a GitHub issue with its symptom, root cause and
+resolution — see [docs/ISSUES.md](docs/ISSUES.md) for the index, or
+[the issues themselves](https://github.com/NathanMaine/gauntletx/issues?q=is%3Aissue).
+
+Two have long-form write-ups where the reasoning outlasts the fix:
+[a run that reported 100% accuracy and meant nothing](docs/issue-001-degenerate-metric.md),
+and [a completed generation that rendered nothing](docs/issue-002-streaming-result-loss.md)
+through valid-but-unreachable JavaScript.
+
 ## Method & credit
 
 The Gauntlet Loop is [Matt Shumer's](https://github.com/mshumer) idea — the
