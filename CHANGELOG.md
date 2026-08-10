@@ -3,6 +3,16 @@
 Notable changes, newest first. The image tag carries the version, so what
 `/api/version` reports is what this file explains.
 
+## 0.3.2 — 2026-08-10
+
+Footer credit. The author name is now a link to the repo, the repo URL is shown
+in full rather than as the words "gauntletx on GitHub", and it leads the second
+line ahead of the method credit — the tool's own home first, the method it
+implements second.
+
+Versioned because the footer is served content, and this project's rule is that
+what `/api/version` reports is what the CHANGELOG explains.
+
 ## 0.3.1 — 2026-08-10
 
 **`METHOD_CONTRACT`** — builders and critics are how the agent works, never

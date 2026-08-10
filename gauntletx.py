@@ -1453,9 +1453,10 @@ footer a{color:var(--accent);text-decoration:none}
   <div id="hlist"></div>
 </div>
 
-<footer><b>gauntletx v__VERSION__</b> by Nathan Maine · <span id="fmodel">…</span><br>
-Method: <a href="https://somethingbig.ai/gauntlet-loop" rel="noopener">Matt Shumer's Gauntlet Loop ↗</a>
- · <a href="https://github.com/NathanMaine/gauntletx" rel="noopener">gauntletx on GitHub ↗</a></footer>
+<footer><b>gauntletx v__VERSION__</b> by <a href="https://github.com/NathanMaine/gauntletx"
+ rel="noopener"><b>Nathan Maine</b> ↗</a> · <span id="fmodel">…</span><br>
+<a href="https://github.com/NathanMaine/gauntletx" rel="noopener">github.com/NathanMaine/gauntletx ↗</a>
+ · Method: <a href="https://somethingbig.ai/gauntlet-loop" rel="noopener">Matt Shumer's Gauntlet Loop ↗</a></footer>
 
 <script>
 const $=i=>document.getElementById(i);
