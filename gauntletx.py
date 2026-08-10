@@ -1050,8 +1050,9 @@ footer a{color:var(--accent);text-decoration:none}
     </div>
     <div class="row">
       <label class="chk"><input type="checkbox" id="dstatuspage"> Structured status page (progress.html)</label>
-      <label class="chk"><input type="checkbox" id="dbaseline"> Degenerate-baseline check (constant + random + label distribution)</label>
+      <label class="chk"><input type="checkbox" id="dbaseline"> Baseline sanity check</label>
       <span class="hint" id="dstatushint">Appends a fixed page contract to the prompt — auto-refreshing, real timestamps, no simulation.</span>
+      <span class="hint" id="dbasehint">Any score must be printed beside a constant-predictor score and the label distribution — catches a metric that looks perfect but means nothing.</span>
     </div>
     <p class="hnote" id="hnote_d" hidden></p>
     <div class="row">
@@ -1094,8 +1095,9 @@ footer a{color:var(--accent);text-decoration:none}
   </div>
   <div class="row">
     <label class="chk"><input type="checkbox" id="statuspage"> Structured status page (progress.html)</label>
-    <label class="chk"><input type="checkbox" id="baseline"> Degenerate-baseline check (constant + random + label distribution)</label>
+    <label class="chk"><input type="checkbox" id="baseline"> Baseline sanity check</label>
     <span class="hint" id="statushint">Appends a fixed page contract to the prompt — auto-refreshing, real timestamps, no simulation.</span>
+    <span class="hint" id="basehint">Any score must be printed beside a constant-predictor score and the label distribution — catches a metric that looks perfect but means nothing.</span>
   </div>
   <p class="hnote" id="hnote_f" hidden></p>
   <label class="lbl" for="refs">References or quality bar you already have <span class="opt">optional</span></label>
@@ -1194,6 +1196,7 @@ function parseSections(raw){
    the prompt card, history, and every copy action all agree. */
 const STATUS_CONTRACT=__STATUS_CONTRACT__;
 const BASELINE_CONTRACT=__BASELINE_CONTRACT__;
+const BASE_HINT='Any score must be printed beside a constant-predictor score and the label distribution — catches a metric that looks perfect but means nothing.';
 function applyStatusContract(raw){
   const re=/^###[ \t]*(BAR|WHY|PROMPT|NOTES)\b[^\n]*$/gim;
   const heads=[];let m;
@@ -1397,12 +1400,28 @@ $('dharness').addEventListener('change',()=>{$('harness').value=$('dharness').va
    The Form-tab box is the FORM_IDS member, so its own change event already
    runs checkDirty; the Describe-tab box mirrors in and calls it by hand
    (programmatic .checked changes fire no events). */
-$('baseline').addEventListener('change',()=>{$('dbaseline').checked=$('baseline').checked});
-$('dbaseline').addEventListener('change',()=>{$('baseline').checked=$('dbaseline').checked});
+/* The baseline sanity check auto-applies to the work types whose bar is
+   usually a NUMBER. Deliberately not keyed to the harness: the failure it
+   guards against (a degenerate metric) is a property of the bar, not of the
+   tool — a writing task on Claude Code does not need it, a Backend task on a
+   (web) target does. A manual toggle takes ownership and is never overridden. */
+const BASELINE_AUTO=['Backend or code','Research'];
+let baselineTouched=false;
+function autoBaseline(){
+  if(baselineTouched)return;
+  const on=BASELINE_AUTO.indexOf($('wtype').value)>=0;
+  $('baseline').checked=on;$('dbaseline').checked=on;
+  const why=on?' Auto-applied for this work type — untick if the bar is not a number.':'';
+  ['basehint','dbasehint'].forEach(id=>{const e=$(id);if(e)e.textContent=BASE_HINT+why});
+}
+$('wtype').addEventListener('change',autoBaseline);
+$('baseline').addEventListener('change',()=>{baselineTouched=true;$('dbaseline').checked=$('baseline').checked});
+$('dbaseline').addEventListener('change',()=>{baselineTouched=true;$('baseline').checked=$('dbaseline').checked});
 $('statuspage').addEventListener('change',()=>{$('dstatuspage').checked=$('statuspage').checked});
 $('dstatuspage').addEventListener('change',()=>{$('statuspage').checked=$('dstatuspage').checked;
   checkDirty()});
 updateHnotes();
+autoBaseline();
 /* Cmd/Ctrl+Enter submits whichever tab is active: draft on Describe, generate on Form */
 document.addEventListener('keydown',e=>{
   if((e.metaKey||e.ctrlKey)&&e.key==='Enter'){
@@ -1513,7 +1532,7 @@ async function runDraft(){
     $('bounds').value=j.boundaries||'';if(j.boundaries)fills.push('bounds');
     showTab('form');
     fills.forEach(flashField);
-    checkDirty();updateHnotes(); /* programmatic fills fire no input events */
+    checkDirty();updateHnotes();autoBaseline(); /* programmatic fills fire no input events */
   }catch(e){showError(String(e)+' (POST /api/draft)')}
   finally{drafting=false;$('draftgo').disabled=false;$('drafthint').hidden=true}
 }

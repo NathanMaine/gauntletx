@@ -3,6 +3,32 @@
 Notable changes, newest first. The image tag carries the version, so what
 `/api/version` reports is what this file explains.
 
+## 0.2.9 — 2026-08-10
+
+Makes the v0.2.8 baseline contract discoverable and mostly automatic.
+
+### Changed
+
+- The toggle **auto-applies for `Backend or code` and `Research`** — the work
+  types whose bar is usually a number — and stays off elsewhere. A manual
+  toggle takes ownership and is never overridden afterwards.
+- **Keyed to work type, not harness, deliberately.** The failure it guards
+  against is a property of the bar, not of the tool: a writing task on Claude
+  Code does not need it, a backend task on a (web) chat target does. Keying it
+  to the harness would have put it in the wrong twelve places.
+- Label reworded from "Degenerate-baseline check" to **"Baseline sanity
+  check"** — the original meant nothing to anyone who had not debugged the run
+  that prompted it.
+- Both tabs gained an explanatory hint, matching the status-page hint pattern
+  that already existed and that 0.2.8 failed to follow. When the check
+  auto-applies, the hint says so and how to turn it off.
+
+### Docs
+
+- `docs/issue-001-degenerate-metric.md` — the full issue and its resolution:
+  symptom, root cause, why five separate guards all failed to fire, the two
+  findings, the fix, verification, and what remains open.
+
 ## 0.2.8 — 2026-08-10
 
 **Degenerate-baseline contract.** A new opt-in toggle, sibling to the status

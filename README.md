@@ -56,7 +56,7 @@ the job gauntletx does for you.
 | 🎭 **Thirteen targets** | Agentic CLIs — including **opencode** and **Antigravity** — plus local/API models and browser chats, each getting correctly adapted phrasing |
 | 🚧 **Hard boundaries** | "Local only, nothing deployed" becomes a rule critics enforce as an automatic fail |
 | 📊 **Live progress page** | Optional toggle appends a fixed `progress.html` contract — real timestamps, no invented history |
-| 🧪 **Degenerate-baseline check** | Optional toggle: any score must be printed beside a constant-predictor score, a random-predictor score, and both label distributions. A model that can't beat a constant is a failed round |
+| 🧪 **Baseline sanity check** | Auto-applies to `Backend or code` and `Research`: any score must be printed beside a constant-predictor score, a random-predictor score, and both label distributions. A model that can't beat a constant is a failed round |
 | 🔒 **Fully local** | Your goal text never leaves the machine you point it at |
 
 ### Where you can paste it
@@ -222,6 +222,25 @@ python3 gauntletx.py --harness Codex "..."                 # Codex phrasing (no 
 python3 gauntletx.py --harness opencode "..."              # opencode — sub-agents, no /loop, no ultracode
 python3 gauntletx.py --harness Antigravity "..."           # Google Antigravity — same closer as opencode/Codex
 python3 gauntletx.py --baseline-check "..."                # require constant/random baselines beside any score
+
+### Baseline sanity check
+
+A measurable bar is the easiest kind to satisfy by accident. This toggle appends a fixed
+contract requiring every reported score to be printed **beside a constant-predictor
+score, a random-predictor score, and the label distribution of both splits** — and
+declares a model that cannot beat the constant a failed round.
+
+It exists because a real run reported **100% accuracy against an 82% target** while
+having learned nothing: a string-comparison bug collapsed every label to one class, where
+a constant predictor scores 100%. 39 tests passed and the loss curve was monotonic
+throughout. One line of baseline output would have caught it in round one. The full
+post-mortem is [issue-001-degenerate-metric.md](docs/issue-001-degenerate-metric.md).
+
+It **auto-applies** to `Backend or code` and `Research`, the work types whose bar is
+usually a number, and can be unticked. It is keyed to work type rather than harness on
+purpose — the failure is a property of the bar, not the tool — and unlike the status page
+it is **not** disabled for `(web)` targets, since reporting a baseline needs no
+filesystem.
 python3 gauntletx.py --harness "Qwen 3.8 (local)" "..."    # or "Gemini CLI", "Qwen3 Coder Next (local)", "DeepSeek V4 Flash (local)"
 python3 gauntletx.py --harness "ChatGPT (web)" "..."       # chat adaptation — or "Claude (web)", "Google Gemini (web)", "Grok (web)"
 python3 gauntletx.py --polish --boundaries "local only — nothing live" "raise my portfolio site to the bar"
