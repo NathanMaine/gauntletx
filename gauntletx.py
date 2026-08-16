@@ -61,8 +61,26 @@ VLLM_URL = os.getenv("GAUNTLETX_VLLM_URL", "http://127.0.0.1:8000/v1/chat/comple
 # instead of hardcoding a name that goes stale every time the box swaps models.
 MODEL_ENV = os.getenv("GAUNTLETX_MODEL", "").strip()
 TEMPERATURE = _num("GAUNTLETX_TEMPERATURE", 0.7, float)
-MAX_TOKENS = _num("GAUNTLETX_MAX_TOKENS", 8192, int)
-TIMEOUT = _num("GAUNTLETX_TIMEOUT", 600.0, float)
+# 8192 was too small and failed silently. Measured on Qwen3.8-27B with this
+# system prompt: a thinking run spends ~13.4k tokens reasoning before it writes
+# a word, and finishes around 15k. At 8192 every complex goal died on
+# finish_reason=length with zero content — six minutes of thinking, no answer.
+# 32768 leaves headroom for a harder goal; a reasoning model that never gets to
+# speak is worse than a slow one.
+MAX_TOKENS = _num("GAUNTLETX_MAX_TOKENS", 32768, int)
+# Raised with it, and for the same reason: the 15k-token run took 657 seconds,
+# so the old 600 would have turned a fixed generation into a timeout.
+TIMEOUT = _num("GAUNTLETX_TIMEOUT", 1800.0, float)
+# Tri-state, and unset is meaningful: None sends no chat_template_kwargs at all
+# and lets the model's own chat template decide. Set it only to force thinking
+# on or off — on this model, off answers the same brief ~13x cheaper.
+_THINK_WORDS = {"true": True, "1": True, "on": True, "yes": True,
+                "false": False, "0": False, "off": False, "no": False}
+_think_raw = os.getenv("GAUNTLETX_ENABLE_THINKING", "").strip().lower()
+if _think_raw and _think_raw not in _THINK_WORDS:
+    sys.exit("gauntletx: GAUNTLETX_ENABLE_THINKING={!r} is not true or false"
+             .format(_think_raw))
+ENABLE_THINKING = _THINK_WORDS.get(_think_raw)
 # The local vLLM needs no key. This passthrough exists only for the day the
 # endpoint sits behind an authenticating proxy; unset, no header is sent.
 API_KEY = os.getenv("GAUNTLETX_API_KEY", "").strip()
@@ -167,18 +185,23 @@ THE PROMPT YOU WRITE — exactly three parts, as plain flowing paragraphs, no he
    there; a local-model or API-model prompt ends 'Run builders and critics as separate
    sessions with fresh context, and keep looping.' and stops there; a (web) prompt ends '...then
    rebuild. Repeat every time I say continue.' and stops there — one closer per prompt,
-   nothing after it, and never a different harness's closer.
+   nothing after it, and never a different harness's closer. If the user gave hard
+   boundaries, the two boundary sentences described under BOUNDARIES go immediately
+   BEFORE this closer; the closer is still the last sentence of the prompt.
 Also tell the lead agent (one sentence, in part 2 or 3) to maintain a simple live progress
 page showing the work evolving — do not overspecify it. This applies to every harness
 EXCEPT the (web) targets: a chat has no progress page, so a (web) prompt never mentions
 one.
 
-BOUNDARIES: if the user gives hard boundaries, put them in ONE blunt sentence at the end
+BOUNDARIES: if the user gives hard boundaries, put them in ONE blunt sentence near the end
 of part 3, followed immediately by one sentence making them a critic rule (e.g. "Build it
 fully local and static; do not deploy anything, register domains, or push anything live.
 Any critic must fail the round outright if a boundary is crossed, no matter how good the
 work looks."). Whenever boundaries are given, BOTH sentences must appear in the prompt —
-the boundary itself and the automatic-fail rule for the critics.
+the boundary itself and the automatic-fail rule for the critics. These two sentences are
+the second-to-last and third-to-last sentences of part 3: the harness closer above still
+comes after them and is always the final sentence. There is no conflict between the two
+rules — boundaries first, closer last.
 
 POLISH MODE: if the user is polishing an existing build, part 1 names the existing
 artifact and states that the job is to raise it to the bar WITHOUT drifting off-brief;
@@ -532,6 +555,17 @@ def sanitize_overrides(raw):
         if not (lo <= val <= hi):
             return None, "{} must be between {} and {}".format(key, lo, hi)
         ov[key] = val
+
+    # Tri-state like the env default: absent means "don't send the kwarg",
+    # which is NOT the same as sending false. Only an explicit choice travels.
+    think = raw.get("enable_thinking")
+    if think not in (None, ""):
+        if isinstance(think, bool):
+            ov["enable_thinking"] = think
+        elif str(think).strip().lower() in _THINK_WORDS:
+            ov["enable_thinking"] = _THINK_WORDS[str(think).strip().lower()]
+        else:
+            return None, "enable_thinking must be true or false"
     return ov, None
 
 
@@ -554,7 +588,8 @@ def config_info():
                          "model": MODEL_ENV or _model_cache["id"] or "",
                          "temperature": TEMPERATURE,
                          "max_tokens": MAX_TOKENS,
-                         "timeout": TIMEOUT},
+                         "timeout": TIMEOUT,
+                         "enable_thinking": ENABLE_THINKING},
             "model_pinned_by_env": bool(MODEL_ENV),
             "api_key_set": bool(API_KEY),
             "served_models": served,
@@ -583,6 +618,12 @@ def open_vllm(user_msg, stream, system_prompt=SYSTEM_PROMPT, ov=None):
                "temperature": ov.get("temperature", TEMPERATURE),
                "max_tokens": ov.get("max_tokens", MAX_TOKENS),
                "stream": bool(stream)}
+    # Only travels when someone actually chose. Sending {"enable_thinking":
+    # true} to a template that has no such variable is harmless, but sending
+    # nothing is harmless everywhere, so unset stays unset.
+    think = ov.get("enable_thinking", ENABLE_THINKING)
+    if think is not None:
+        payload["chat_template_kwargs"] = {"enable_thinking": bool(think)}
     timeout = ov.get("timeout", TIMEOUT)
     retried = False
     while True:
@@ -610,6 +651,29 @@ def open_vllm(user_msg, stream, system_prompt=SYSTEM_PROMPT, ov=None):
             return None, "cannot reach vLLM at {}: {}".format(url, e)
 
 
+def delta_reasoning(d):
+    """The thinking text out of a delta or a message object, whatever this
+    build of vLLM decided to call the field this month.
+
+    0.27.x emits `reasoning`; earlier builds emit `reasoning_content`. Reading
+    only one of them is how a server upgrade silently blanks the thinking pane
+    and turns an eleven-minute run into an eleven-minute spinner — which is
+    exactly what happened between 0.3.6 and this version."""
+    if not isinstance(d, dict):
+        return ""
+    return d.get("reasoning") or d.get("reasoning_content") or ""
+
+
+def truncation_error(ov=None):
+    """The message for a generation that ran out of tokens mid-thought. Names
+    the budget it hit and the two knobs that change the outcome — a truncation
+    notice the reader cannot act on is just a prettier "no output"."""
+    cap = (ov or {}).get("max_tokens", MAX_TOKENS)
+    return ("the model used all {} tokens thinking and never wrote an answer — "
+            "raise Max tokens in Config, or set Thinking to off for a much "
+            "faster reply".format(cap))
+
+
 def sse_events(resp):
     """Yield ("reasoning"|"content", text) from a streaming vLLM response,
     read line by line off the socket so tokens surface as they arrive, then a
@@ -619,10 +683,15 @@ def sse_events(resp):
     end of stream, not an error), and the caller must report truncation,
     never success.
 
+    Also yields ("finish", reason) whenever a chunk carries a finish_reason.
+    `[DONE]` arrives after a truncated generation exactly as it does after a
+    clean one, so the terminator alone cannot tell the two apart — without
+    this the caller reports "no output" for a run that hit its token cap.
+
     The server runs with --reasoning-parser qwen3, so a delta may carry
-    reasoning_content (thinking) or content (the answer) — occasionally the
-    boundary chunk carries both. They are yielded as separate events and
-    never concatenated: mixing them would leak thinking into the prompt.
+    thinking or content — occasionally the boundary chunk carries both. They
+    are yielded as separate events and never concatenated: mixing them would
+    leak thinking into the prompt.
     """
     for raw_line in resp:
         line = raw_line.decode("utf-8", "replace").strip()
@@ -641,15 +710,20 @@ def sse_events(resp):
         if not isinstance(obj, dict):
             continue
         first = (obj.get("choices") or [{}])[0]
-        delta = first.get("delta") if isinstance(first, dict) else None
-        if not isinstance(delta, dict):
+        if not isinstance(first, dict):
             continue
-        r = delta.get("reasoning_content")
-        if r:
-            yield "reasoning", r
-        c = delta.get("content")
-        if c:
-            yield "content", c
+        delta = first.get("delta")
+        if isinstance(delta, dict):
+            r = delta_reasoning(delta)
+            if r:
+                yield "reasoning", r
+            c = delta.get("content")
+            if c:
+                yield "content", c
+        # Last, so the text in this same chunk is already out the door.
+        fin = first.get("finish_reason")
+        if fin:
+            yield "finish", fin
 
 
 # ------------------------------------------------------------ section parsing
@@ -953,7 +1027,18 @@ def call_blocking(user_msg, system_prompt, ov=None):
     except (KeyError, IndexError, TypeError):
         return None, None, "unexpected reply shape from {}: {}".format(
             VLLM_URL, str(data)[:200])
-    return (msg.get("content") or "").strip(), msg.get("reasoning_content") or "", None
+    content = (msg.get("content") or "").strip()
+    # A reasoning model that spends its whole budget thinking returns HTTP 200
+    # with an empty content string. Reported as success that is a blank screen
+    # and a shrug; reported as this, it names the knob that fixes it. Partial
+    # content still ships — showing what arrived beats showing nothing.
+    if not content:
+        try:
+            if data["choices"][0].get("finish_reason") == "length":
+                return None, None, truncation_error(ov)
+        except (KeyError, IndexError, TypeError):
+            pass
+    return content, delta_reasoning(msg), None
 
 
 def generate_blocking(goal, mode, work_type, references, constraints, boundaries, harness,
@@ -1366,7 +1451,14 @@ footer a:hover{text-decoration:underline}
           <input id="cfgmax" type="number" min="1" max="200000" placeholder="default"></div>
         <div class="field"><label for="cfgtimeout">Timeout (s)</label>
           <input id="cfgtimeout" type="number" min="5" max="3600" placeholder="default"></div>
+        <div class="field"><label for="cfgthink">Thinking</label>
+          <select id="cfgthink"><option value="">server default</option>
+            <option value="true">on</option>
+            <option value="false">off</option></select></div>
       </div>
+      <p class="hint">A reasoning model can spend its whole token budget thinking and
+      never write an answer. Thinking off answers the same brief far faster and far
+      cheaper; leave it on when you want the model to work the problem harder.</p>
       <div class="row">
         <button id="cfgsave" class="ghost">Save</button>
         <button id="cfgclear" class="ghost">Reset to server defaults</button>
@@ -1787,7 +1879,8 @@ async function runSelfTest(){
    and a laptop can differ. */
 const CFG_KEY='gauntletx.config.v1';
 const CFG_FIELDS={cfgurl:'vllm_url',cfgmodel:'model',cfgtemp:'temperature',
-                  cfgmax:'max_tokens',cfgtimeout:'timeout'};
+                  cfgmax:'max_tokens',cfgtimeout:'timeout',
+                  cfgthink:'enable_thinking'};
 function cfgRead(){
   try{return JSON.parse(localStorage.getItem(CFG_KEY)||'{}')}catch(e){return {}}
 }
@@ -1822,6 +1915,12 @@ async function cfgLoadServer(){
     $('cfgtemp').placeholder=d.temperature;
     $('cfgmax').placeholder=d.max_tokens;
     $('cfgtimeout').placeholder=d.timeout;
+    /* a select has no placeholder — say what "server default" resolves to */
+    const th=$('cfgthink');
+    if(th&&th.options.length){
+      th.options[0].textContent='server default'+
+        (d.enable_thinking===true?' (on)':d.enable_thinking===false?' (off)':'');
+    }
     const bits=[];
     if(j.discovery_error)bits.push('endpoint unreachable — '+j.discovery_error);
     else bits.push((j.served_models||[]).length+' model(s) served');
@@ -2181,6 +2280,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self._sse_started = True
         saw_done = False
+        finish = None  # last finish_reason the upstream reported, if any
         acc = []  # streamed content, for the (web) post-generation guards
         try:
             with resp:
@@ -2188,10 +2288,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     if kind == "done":
                         saw_done = True
                         break
+                    if kind == "finish":
+                        # Server-side bookkeeping, not a UI frame — the client
+                        # has no handler for it and would ignore it anyway.
+                        finish = text
+                        continue
                     if kind == "content":
                         acc.append(text)
                     self._sse({"type": kind, "text": text})
-            if saw_done:
+            # `length` means the model was cut off mid-generation. [DONE] still
+            # arrives, so this is the ONLY way to tell it from a clean finish —
+            # and it must never become `done`, which the UI reads as a complete
+            # prompt worth stapling a contract to and saving to history.
+            if saw_done and finish == "length":
+                self._sse({"type": "error", "text": truncation_error(ov)})
+            elif saw_done:
                 # (web) guards on the finished stream: the tokens already went
                 # out live, so a repaired closer arrives as one `replace` frame
                 # (the full corrected raw — the UI swaps its buffer before

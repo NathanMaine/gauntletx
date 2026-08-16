@@ -3,6 +3,75 @@
 Notable changes, newest first. The image tag carries the version, so what
 `/api/version` reports is what this file explains.
 
+## 0.3.7 — 2026-08-15
+
+**The model was working the whole time.**
+
+A goal with full references, constraints and boundaries returned
+*"the model returned no output"* after six minutes of blank spinner. Nothing was
+down: the endpoint was reachable, the model was loaded, the request was accepted,
+and vLLM streamed for 358 seconds before closing cleanly. Three separate defects
+stacked up to make a healthy model look dead.
+
+### 1. The budget was half what the model needed
+
+Measured on Qwen3.8-27B with this system prompt: **~13,400 tokens of thinking
+before the first word of the answer, ~15,006 to finish.** `GAUNTLETX_MAX_TOKENS`
+was 8192. Every complex goal died on `finish_reason=length` with the entire
+budget spent reasoning and **zero content tokens** — the model was still working
+out the brief when the cap cut it off.
+
+`GAUNTLETX_MAX_TOKENS` is now **32768**, and `GAUNTLETX_TIMEOUT` **1800**. The
+timeout had to move too: the successful 15k-token run took **657 seconds**, so
+raising the token budget alone would only have traded a blank result for a
+timeout.
+
+### 2. A silent field rename blanked the thinking pane
+
+vLLM 0.27.x streams thinking as `delta.reasoning`; earlier builds used
+`delta.reasoning_content`, and that is the only name 0.3.6 knew. The blocking
+door had the same blind spot. So the one signal that would have explained the
+wait — *thousands of visible thinking tokens* — was dropped on the floor, and a
+long-but-working run was indistinguishable from a hang.
+
+`delta_reasoning()` now reads either name, in both doors. A server upgrade
+should not be able to blank the pane again.
+
+### 3. Truncation was reported as "no output"
+
+`[DONE]` arrives after a truncated generation exactly as it does after a clean
+one. 0.3.6 detected truncation only by a *missing* terminator, so a generation
+that hit its cap looked like a successful generation that produced nothing.
+
+`sse_events` now yields `("finish", reason)`, and a `length` finish becomes an
+error that names the budget it hit and the knob that changes it — never a `done`
+frame, which the UI reads as a complete prompt worth saving to history. The
+blocking door returns the same message instead of an empty success.
+
+### Added: a thinking toggle
+
+`GAUNTLETX_ENABLE_THINKING` and a **Thinking** control in the Config panel, both
+tri-state — unset sends no `chat_template_kwargs` at all and lets the model's own
+chat template decide. Set it to off and the same brief comes back in **~600
+tokens and 29 seconds** instead of ~15,000 tokens and 11 minutes: roughly 13x
+cheaper, 24x faster, with the model no longer working the problem out loud.
+
+### Fixed: two rules that both claimed the last sentence
+
+Found in the model's own reasoning while diagnosing the above — it stalled
+visibly on *"Which takes precedence? Need parse."* `BOUNDARIES` put its two
+sentences "at the end of part 3"; the harness-closer rule made its closer "the
+final sentence of this third paragraph … and stops there, nothing after it".
+Both are now explicit and cross-referenced: **boundaries second-to-last, closer
+always last.**
+
+This one is worth stating plainly: it is a real contradiction, but it was **not**
+the cause. Removing boundaries entirely still reproduced the failure, which is
+how it got ruled out rather than assumed.
+
+Full write-up: `docs/issue-004-silent-truncation.md`. `test_logic.py` → **159
+checks**; 250 across both suites.
+
 ## 0.3.6 — 2026-08-10
 
 **A guard that reports is not a guard that checks.**

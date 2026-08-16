@@ -359,8 +359,9 @@ All optional — every one has a working default. See [.env.example](.env.exampl
 | `GAUNTLETX_VLLM_URL` | `http://127.0.0.1:8000/v1/chat/completions` | OpenAI-compatible chat endpoint. |
 | `GAUNTLETX_MODEL` | *(auto-discovered)* | Model id to request. Unset, gauntletx asks the sibling `/v1/models` and takes what's loaded; re-discovers on 404. |
 | `GAUNTLETX_TEMPERATURE` | `0.7` | Sampling temperature. |
-| `GAUNTLETX_MAX_TOKENS` | `8192` | Completion budget — room for reasoning plus all sections. |
-| `GAUNTLETX_TIMEOUT` | `600` | Seconds per vLLM call. Reasoning models think first. |
+| `GAUNTLETX_MAX_TOKENS` | `32768` | Completion budget. A reasoning model spends most of it thinking — measured at ~15k tokens for one generation — and a budget that runs out mid-thought returns nothing at all. |
+| `GAUNTLETX_TIMEOUT` | `1800` | Seconds per vLLM call. Raise this with `MAX_TOKENS`, never alone: a 15k-token run takes ~11 minutes, so a short timeout turns a working generation into a failure. |
+| `GAUNTLETX_ENABLE_THINKING` | *(unset)* | `true` / `false`. Unset sends no `chat_template_kwargs` and lets the model's chat template decide. `false` answers the same brief ~13x cheaper and ~24x faster, at the cost of the model reasoning it through first. Per-browser override in the Config panel. |
 | `GAUNTLETX_API_KEY` | *(unset)* | Sent as `Authorization: Bearer` when set — only for a vLLM behind an authenticating proxy. Unset, no header is sent. |
 
 Port and host are CLI flags, not env vars: `--port 7332 --host 0.0.0.0`.
@@ -512,9 +513,12 @@ than you'd have asked for.
 | [gauntletx_version.py](gauntletx_version.py) + [VERSION](VERSION) | Which release this is — `/api/version`, the UI footer, the image tag. |
 | [Dockerfile](Dockerfile) + [docker-compose.yml](docker-compose.yml) | Container deployment — hardened, no volumes, the tag carries the version. |
 | [.env.example](.env.example) | Every knob, with defaults. No secrets required — a local endpoint needs no key. |
+| [test_units.py](test_units.py) + [test_logic.py](test_logic.py) | The offline suites — `coerce_harness`, the contract doors, env parsing, section parsing, `sse_events`, the override validator. Also run by `/api/selftest`. |
 | [test_smoke.sh](test_smoke.sh) | PASS/FAIL smoke test against a running instance — version fields, one real generation, one real draft. |
 | [CHANGELOG.md](CHANGELOG.md) | What changed in each release. |
 | [docs/spec.md](docs/spec.md) | The as-built spec, with the prompt-engineering notes. |
+| [docs/ISSUES.md](docs/ISSUES.md) | Every defect found and fixed, with the long-form write-ups and the patterns worth keeping visible. |
+| [docs/threat-model.md](docs/threat-model.md) | What this is safe for, and what it is not. Read before exposing it past your own network. |
 | [docs/screenshots/](docs/screenshots/) | The demo images used above. |
 
 ## Known limitations
@@ -546,13 +550,23 @@ MIT — see [LICENSE](LICENSE).
 ### Config page
 
 A ⚙ panel at the bottom of the first tab picks the model that writes your prompts —
-endpoint, model, temperature, max tokens, timeout — with the model list populated from
-what your endpoint actually reports.
+endpoint, model, temperature, max tokens, timeout, thinking — with the model list
+populated from what your endpoint actually reports.
 
 Config is stored in **your browser**, not on the server: the container runs read-only, so
 settings travel as per-request overrides and the server range-checks each one. Config
 therefore follows the browser, so a phone and a laptop can hold different settings. Blank
 means "use the server default", and `GET /api/config` shows what those are.
+
+**Thinking** is tri-state, and the blank default is the meaningful one: it sends no
+`chat_template_kwargs` at all and lets the model's own chat template decide. Set it to
+**off** and a reasoning model answers directly — on the model this was tuned against, the
+same brief came back in ~600 tokens and 29 seconds instead of ~15,000 tokens and 11
+minutes. Leave it **on** when you want the model to work the problem through first, and
+give it the token budget to do so: a reasoning model spends nearly all of its budget
+thinking, and one that runs out mid-thought returns **nothing at all**, not a short
+answer. That failure and its fix are written up in
+[docs/issue-004-silent-truncation.md](docs/issue-004-silent-truncation.md).
 
 ## Expectations — what changes on a smaller model
 

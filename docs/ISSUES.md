@@ -1,7 +1,7 @@
 # Issue log
 
 Every defect found and fixed. Each links to a GitHub issue with the symptom, root cause and
-resolution. Three have long-form write-ups in this directory.
+resolution. Four have long-form write-ups in this directory.
 
 | # | Issue | Fixed in |
 |---|---|---|
@@ -20,6 +20,9 @@ resolution. Three have long-form write-ups in this directory.
 | [#13](https://github.com/NathanMaine/gauntletx/issues/13) | Prompt told agents to fan out sub-agents with no fallback when the harness has none | 0.3.1 |
 | [#14](https://github.com/NathanMaine/gauntletx/issues/14) | Autonomy was assumed, not instructed — one harness stopped for approval, another looped without progress | 0.3.5 |
 | [#15](https://github.com/NathanMaine/gauntletx/issues/15) | BASELINE_CONTRACT was satisfied by a baseline that was computed wrong | 0.3.6 |
+| 16 † | A working generation reported as "the model returned no output": token budget half what a reasoning model needed, thinking pane blanked by an upstream field rename, truncation indistinguishable from success | 0.3.7 |
+
+† No GitHub issue filed — found and fixed in one session.
 
 ## Long-form write-ups
 
@@ -29,6 +32,9 @@ resolution. Three have long-form write-ups in this directory.
   generation rendered nothing, through valid-but-unreachable JavaScript.
 - [issue-003-broken-guard.md](issue-003-broken-guard.md) — the guard was present, called,
   reported, and wrong. Worse than absent, because it manufactured confidence.
+- [issue-004-silent-truncation.md](issue-004-silent-truncation.md) — six minutes of
+  nothing, from a model that was working fine. Three defects stacked to hide a healthy
+  generation, and the most satisfying root cause turned out not to be the cause.
 
 ## Patterns worth keeping visible
 
@@ -41,6 +47,20 @@ and #12 by the feature in #10.
 **Test the feature, do not read it.** #11 and #12 were found by feeding the config
 overrides a model that does not exist and a port that is closed. #13's first fix was a
 SYSTEM_PROMPT sentence the model silently dropped, caught by generating and grepping.
+
+**Falsify the satisfying cause.** #16's investigation turned up a real contradiction in
+SYSTEM_PROMPT, visible in the model's own reasoning, that was *not* the cause — removing
+it reproduced the failure unchanged. A plausible cause found mid-investigation still needs
+the one run that would rule it out.
+
+**A terminator is not a completion.** #2 and #16 both mistook a transport signal for a
+work signal: the stream closed, so the generation must have finished. Where a protocol
+offers a separate completion field, reading the transport instead is a bug waiting for a
+slow day.
+
+**Upstreams rename things.** #4 (a retired harness) and #16 (`reasoning_content` →
+`reasoning` in a vLLM minor release) are the same failure from opposite directions —
+something outside the repo changed and nothing inside it noticed.
 
 **Advice competes for budget; a contract does not.** #1, #2, #13 and #14 each ended with
 the fix moving out of SYSTEM_PROMPT into a deterministic append the model never sees.

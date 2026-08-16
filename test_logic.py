@@ -290,6 +290,82 @@ try:
 except Exception as e:                                    # pragma: no cover
     check("sse_events raised: " + type(e).__name__, False, True)
 
+# ------------------------------------- v0.3.7: the two silent-failure bugs
+#
+# Both of these shipped in 0.3.6 and cost a user six minutes of blank spinner
+# followed by "the model returned no output" on a run that was working fine.
+
+# 1. vLLM 0.27.x renamed the thinking field to `reasoning`. Reading only
+#    `reasoning_content` blanked the thinking pane on a server upgrade.
+check("delta_reasoning reads the new field",
+      G.delta_reasoning({"reasoning": "new"}), "new")
+check("delta_reasoning still reads the old field",
+      G.delta_reasoning({"reasoning_content": "old"}), "old")
+check("delta_reasoning prefers the new field",
+      G.delta_reasoning({"reasoning": "new", "reasoning_content": "old"}), "new")
+check("delta_reasoning tolerates junk", G.delta_reasoning(None), "")
+check("delta_reasoning tolerates an empty delta", G.delta_reasoning({}), "")
+
+try:
+    ev = list(G.sse_events(_FakeResp([
+        'data: {"choices":[{"delta":{"reasoning":"thinking hard"}}]}',
+        'data: [DONE]',
+    ])))
+    check("sse_events surfaces the renamed reasoning field",
+          [(k, t) for k, t in ev if k == "reasoning"], [("reasoning", "thinking hard")])
+except Exception as e:                                    # pragma: no cover
+    check("sse_events raised on renamed field: " + type(e).__name__, False, True)
+
+# 2. [DONE] arrives after a truncated generation exactly as after a clean one,
+#    so finish_reason is the only way to tell them apart.
+try:
+    ev = list(G.sse_events(_FakeResp([
+        'data: {"choices":[{"delta":{"reasoning":"still thinking"}}]}',
+        'data: {"choices":[{"delta":{},"finish_reason":"length"}]}',
+        'data: [DONE]',
+    ])))
+    check("sse_events reports a truncated finish",
+          [t for k, t in ev if k == "finish"], ["length"])
+    check("sse_events still terminates on [DONE]", ev[-1][0], "done")
+except Exception as e:                                    # pragma: no cover
+    check("sse_events raised on finish_reason: " + type(e).__name__, False, True)
+
+try:
+    ev = list(G.sse_events(_FakeResp([
+        'data: {"choices":[{"delta":{"content":"last words"},"finish_reason":"stop"}]}',
+        'data: [DONE]',
+    ])))
+    # Text in the same chunk must go out BEFORE the finish marker, or a caller
+    # that stops on `finish` would drop the final tokens.
+    check("sse_events emits chunk text before its finish marker",
+          [k for k, _ in ev], ["content", "finish", "done"])
+except Exception as e:                                    # pragma: no cover
+    check("sse_events raised on trailing content: " + type(e).__name__, False, True)
+
+check_true("truncation_error names the budget it hit",
+           str(G.MAX_TOKENS) in G.truncation_error())
+check_true("truncation_error honours a per-request cap",
+           "4096" in G.truncation_error({"max_tokens": 4096}))
+check_true("truncation_error names a knob that fixes it",
+           "Max tokens" in G.truncation_error())
+
+# ---------------------------------- v0.3.7: enable_thinking is TRI-state
+# Absent must not collapse to false — unset means "send no chat_template_kwargs
+# at all" and let the model's own template decide.
+ov, err = G.sanitize_overrides({})
+check("enable_thinking absent stays absent", "enable_thinking" in ov, False)
+check("enable_thinking absent is not an error", err, None)
+ov, err = G.sanitize_overrides({"enable_thinking": ""})
+check("enable_thinking empty string stays absent", "enable_thinking" in ov, False)
+for sent, want in (("false", False), ("true", True), ("off", False), ("on", True),
+                   ("0", False), ("1", True), (False, False), (True, True)):
+    ov, err = G.sanitize_overrides({"enable_thinking": sent})
+    check("enable_thinking {!r} parses".format(sent), (ov.get("enable_thinking"), err),
+          (want, None))
+ov, err = G.sanitize_overrides({"enable_thinking": "sometimes"})
+check("enable_thinking rejects junk", ov, None)
+check_true("enable_thinking junk explains itself", "true or false" in (err or ""))
+
 # --------------------------------------------------------- SectionStream
 buf = io.StringIO()
 _stdout = sys.stdout

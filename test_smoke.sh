@@ -2,7 +2,7 @@
 # Smoke test for a RUNNING gauntletx server. Starts nothing itself.
 #
 #   ./test_smoke.sh                                   # against http://127.0.0.1:7332
-#   BASE_URL=http://my-server:7332 ./test_smoke.sh    # against a remote instance
+#   BASE_URL=http://a-host-on-your-lan:7332 ./test_smoke.sh   # against another box
 #
 # Exercises /api/version, two real stream=false generations (plain, and with
 # status_page=true asserting the appended contract's final sentence), and one
