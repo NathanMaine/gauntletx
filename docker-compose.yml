@@ -13,11 +13,11 @@
 
 services:
   gauntletx:
-    image: gauntletx:0.3.7
+    image: gauntletx:0.3.8
     build:
       context: .
       args:
-        VERSION: "0.3.7"
+        VERSION: "0.3.8"
     container_name: gauntletx
     ports:
       - "7332:7332"

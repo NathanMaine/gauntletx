@@ -3,6 +3,77 @@
 Notable changes, newest first. The image tag carries the version, so what
 `/api/version` reports is what this file explains.
 
+## 0.3.8 — 2026-08-16
+
+**A frontier model can write the prompt now — and a stored key stays home.**
+
+gauntletx assumed one endpoint: the local vLLM it was configured for. Three
+hosted providers are now presets, so the model that writes your prompt can be a
+frontier model even when the model that runs it is not.
+
+### Added
+
+**Providers.** OpenRouter, DeepSeek and Qwen (DashScope) alongside Local vLLM
+and a Custom endpoint. All five speak the OpenAI chat-completions shape, so a
+provider is only a URL, a place to find its key, and whether it serves one model
+or a catalogue — no per-provider request code.
+
+**Keys, from either side.** `GAUNTLETX_OPENROUTER_API_KEY`,
+`GAUNTLETX_DEEPSEEK_API_KEY`, `GAUNTLETX_QWEN_API_KEY` for a box-wide default, or
+a key typed into the Config panel for a per-browser one. The panel says *"set on
+server"* when an env key already covers the provider.
+
+**The Config panel is on both tabs.** The model that *writes* your prompt is a
+different choice from the harness that *runs* it, and you need the first one
+wherever you are standing. Both copies are the same settings and mirror as you
+type. The harness labels now say *"who runs the prompt"* outright, because two
+controls that both look like "pick a model" will otherwise be read as one.
+
+**A model field you can type into.** OpenRouter serves 413 models as of today; a
+dropdown is the wrong shape. It is now a filter box over a live `datalist` — type
+`claude`, pick one — populated from `POST /api/models`, which asks whichever
+endpoint the browser is actually pointed at. A POST and not a query string
+because an API key in a URL lands in every access log between here and there.
+
+### A stored key is bound to its provider's host
+
+A user-controlled endpoint and a server-held secret combine badly by default. The
+naive version attaches whatever key the server holds to whatever URL the request
+names — which, since the endpoint is deliberately overridable, means anyone who
+can reach the port points gauntletx at a box they control and receives the key
+with the first request.
+
+Keys are therefore resolved **from the URL being called**, never from ambient
+state: a supplied key wins; a stored key is used only when the host is the one it
+was configured for; otherwise no `Authorization` header is sent. A custom
+endpoint never receives a stored key and can still authenticate with one typed
+into the panel. Written up in `docs/threat-model.md`, asserted in `test_logic.py`.
+
+### Fixed
+
+**The model list ignored your endpoint.** `models_url()` and `_headers()` read
+the globals, so pointing the config page at another provider still listed the
+local box's model, with the local box's credentials. Both take the override now.
+
+**Discovery no longer guesses on a catalogue.** `data["data"][0]["id"]` is
+discovery when an endpoint serves one model and a coin toss when it serves 413.
+It is taken only in the single-model case; otherwise you are asked to pick, and
+told why. The cache is keyed per endpoint — one global slot would have served
+OpenRouter's answer to the local box.
+
+**Two failure modes that a local vLLM never produced** now explain themselves
+instead of surfacing raw: a missing CA bundle (`CERTIFICATE_VERIFY_FAILED`, which
+makes every `https://` provider fail and no `http://` one) and a 401/403, which
+names the host and points at where to set a key.
+
+**`/api/version` 500'd**, briefly and only in development: keying the model cache
+per URL turned `_model_cache["id"]` into a `KeyError` on the endpoint the
+container healthcheck polls. Caught in a browser console, not by the suite —
+`version_info` was on the "needs a live server" exclusion list. Its shape is
+asserted now against a refused port, which costs nothing and would have caught it.
+
+`test_logic.py` → **202 checks**; 293 across both suites.
+
 ## 0.3.7 — 2026-08-15
 
 **The model was working the whole time.**

@@ -36,6 +36,7 @@ import sys
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 try:
@@ -84,6 +85,87 @@ ENABLE_THINKING = _THINK_WORDS.get(_think_raw)
 # The local vLLM needs no key. This passthrough exists only for the day the
 # endpoint sits behind an authenticating proxy; unset, no header is sent.
 API_KEY = os.getenv("GAUNTLETX_API_KEY", "").strip()
+
+# ------------------------------------------------------------------ providers
+#
+# Every target here speaks the OpenAI chat-completions shape, so a provider is
+# only three facts: where to POST, where its key comes from, and whether the
+# endpoint serves one model or a catalogue. No per-provider request code.
+#
+# `url: ""` means "whatever this server is configured for" — the local box is
+# the one provider whose address is not knowable at import time.
+PROVIDERS = [
+    {"id": "local", "label": "Local vLLM", "url": "",
+     "env": "GAUNTLETX_API_KEY", "catalogue": False},
+    {"id": "openrouter", "label": "OpenRouter",
+     "url": "https://openrouter.ai/api/v1/chat/completions",
+     "env": "GAUNTLETX_OPENROUTER_API_KEY", "catalogue": True},
+    {"id": "deepseek", "label": "DeepSeek",
+     "url": "https://api.deepseek.com/v1/chat/completions",
+     "env": "GAUNTLETX_DEEPSEEK_API_KEY", "catalogue": True},
+    {"id": "qwen", "label": "Qwen (DashScope)",
+     "url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions",
+     "env": "GAUNTLETX_QWEN_API_KEY", "catalogue": True},
+]
+
+
+def _host(url):
+    """The lowercased hostname of a URL, or "" if it has none. Never raises —
+    an unparseable endpoint is a request that gets no key, not a crash."""
+    try:
+        return (urllib.parse.urlsplit(url or "").hostname or "").lower()
+    except ValueError:
+        return ""
+
+
+# host -> key, built once at import from whichever provider env vars are set.
+# Keyed by HOST rather than provider id on purpose: the lookup at request time
+# starts from the URL being called, so a key can only ever travel to the host
+# it was issued for.
+_KEY_BY_HOST = {}
+for _p in PROVIDERS:
+    _v = os.getenv(_p["env"], "").strip()
+    if _v and _p["url"]:
+        _KEY_BY_HOST[_host(_p["url"])] = _v
+
+
+def resolve_key(url, ov=None):
+    """The bearer token to send to `url`, or "" for none.
+
+    Order: the browser's own key wins; failing that, a key stored on the server
+    is used ONLY when `url` is the host that key belongs to.
+
+    That second clause is the whole point. The endpoint is overridable by
+    design (see docs/threat-model.md), so a stored key that attaches to
+    whatever URL a request names is a key-exfiltration path: point gauntletx at
+    a box you control and it posts the secret to you. Binding each key to its
+    provider's host closes it, and leaves a custom endpoint able to use a key
+    only if the caller supplies one."""
+    ov = ov or {}
+    supplied = (ov.get("api_key") or "").strip()
+    if supplied:
+        return supplied
+    host = _host(url)
+    if not host:
+        return ""
+    if host in _KEY_BY_HOST:
+        return _KEY_BY_HOST[host]
+    # The generic passthrough covers the server's own configured endpoint only.
+    if API_KEY and host == _host(VLLM_URL):
+        return API_KEY
+    return ""
+
+
+def provider_for(url):
+    """The provider id whose host matches `url`, or "custom". The local entry
+    matches this server's configured endpoint, whatever that happens to be."""
+    host = _host(url)
+    for p in PROVIDERS:
+        if p["url"] and _host(p["url"]) == host:
+            return p["id"]
+    if host and host == _host(VLLM_URL):
+        return "local"
+    return "custom"
 
 # Input caps — reject with 400, never truncate silently.
 GOAL_MAX = 8000
@@ -418,47 +500,108 @@ def coerce_harness(value):
 
 # ---------------------------------------------------------------- vLLM client
 
-def models_url():
-    """The sibling /v1/models endpoint, derived from the chat URL so one env
-    var configures both."""
-    if "/chat/completions" in VLLM_URL:
-        return VLLM_URL.rsplit("/chat/completions", 1)[0] + "/models"
-    return VLLM_URL.rstrip("/") + "/models"
+def chat_url(ov=None):
+    """The chat-completions endpoint this request should use: the browser's
+    override if it sent one, else the server's own."""
+    return ((ov or {}).get("vllm_url") or VLLM_URL)
 
 
-def _headers():
+def models_url(ov=None):
+    """The sibling /v1/models endpoint, derived from the chat URL so one
+    setting configures both. Honours the override — reading the global here
+    was a real bug: pick OpenRouter and the model list still came from the
+    local box."""
+    u = chat_url(ov)
+    if "/chat/completions" in u:
+        return u.rsplit("/chat/completions", 1)[0] + "/models"
+    return u.rstrip("/") + "/models"
+
+
+def _headers(ov=None, url=None):
+    """Request headers for `url` (default: this request's chat endpoint).
+    The key is resolved from the URL, never from ambient state."""
     h = {"Content-Type": "application/json"}
-    if API_KEY:
-        h["Authorization"] = "Bearer " + API_KEY
+    key = resolve_key(url or chat_url(ov), ov)
+    if key:
+        h["Authorization"] = "Bearer " + key
     return h
 
 
-# The only mutable global: which model the vLLM box is currently serving.
-# Guarded by a lock because the ThreadingTCPServer handles requests in
-# parallel and discovery must happen exactly once, not once per request.
+def list_models(ov=None, timeout=10):
+    """Every model id the endpoint advertises, as (ids, error). Shared by
+    discovery and the config page so both see the same catalogue."""
+    url = models_url(ov)
+    try:
+        req = urllib.request.Request(url, headers=_headers(ov))
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            data = json.loads(r.read())
+        ids = [m.get("id") for m in (data.get("data") or [])
+               if isinstance(m, dict) and m.get("id")]
+    except (urllib.error.URLError, OSError, ValueError,
+            KeyError, TypeError) as e:
+        return [], _endpoint_error(e, url)
+    return ids, None
+
+
+def _endpoint_error(e, url):
+    """A one-line explanation of why an endpoint call failed, translating the
+    two failures that HTTPS providers introduce and a bare local vLLM never
+    produced. Both are cryptic verbatim and trivial once named."""
+    text = "{}: {}".format(type(e).__name__, e)
+    if "CERTIFICATE_VERIFY_FAILED" in text:
+        return (text + " — this Python has no CA bundle, so it cannot verify "
+                "any https:// endpoint. Install ca-certificates (or run "
+                "'Install Certificates.command' on a python.org build). Local "
+                "http:// endpoints are unaffected.")
+    if getattr(e, "code", None) in (401, 403):
+        return (text + " — {} rejected the credentials. Set an API key for this "
+                "provider in Config, or on the server.".format(_host(url) or url))
+    return text
+
+
+# Which model an endpoint is serving, cached per models_url. Keyed by URL and
+# not a single slot because more than one endpoint is now reachable in a single
+# process: one global would let a catalogue provider's answer be served to the
+# local box. Guarded by a lock because ThreadingTCPServer handles requests in
+# parallel and discovery should happen once per endpoint, not once per request.
 _model_lock = threading.Lock()
-_model_cache = {"id": None}
+_model_cache = {}
 
 
-def resolve_model(force=False):
-    """Return (model_id, error). GAUNTLETX_MODEL wins; otherwise ask
-    /v1/models what is loaded and cache the answer."""
-    if MODEL_ENV:
+def resolve_model(force=False, ov=None):
+    """Return (model_id, error).
+
+    An explicit choice always wins — the browser's, then GAUNTLETX_MODEL for
+    the server's own endpoint. Otherwise ask the endpoint what it serves, and
+    take the answer ONLY when it serves exactly one thing.
+
+    That last condition is new with multi-model providers. Taking `data[0]`
+    from a vLLM serving one model is discovery; taking `data[0]` from a
+    catalogue of hundreds is a coin toss that silently bills you for whichever
+    model sorted first."""
+    ov = ov or {}
+    if ov.get("model"):
+        return ov["model"], None
+    # An env pin describes the box this server was configured for. It must not
+    # follow the request to a provider that has never heard of that name.
+    if MODEL_ENV and not ov.get("vllm_url"):
         return MODEL_ENV, None
+    url = models_url(ov)
     with _model_lock:
-        if _model_cache["id"] and not force:
-            return _model_cache["id"], None
-        url = models_url()
-        try:
-            req = urllib.request.Request(url, headers=_headers())
-            with urllib.request.urlopen(req, timeout=10) as r:
-                data = json.loads(r.read())
-            mid = data["data"][0]["id"]
-        except (urllib.error.URLError, OSError, ValueError, KeyError, IndexError, TypeError) as e:
-            return None, ("could not discover a model from {} — set GAUNTLETX_MODEL "
-                          "or start vLLM ({})".format(url, e))
-        _model_cache["id"] = mid
-        return mid, None
+        if not force and url in _model_cache:
+            return _model_cache[url], None
+    ids, err = list_models(ov)
+    if err:
+        return None, ("could not discover a model from {} — pick one in Config "
+                      "({})".format(url, err))
+    if not ids:
+        return None, "{} advertises no models — pick one in Config".format(url)
+    if len(ids) > 1:
+        return None, ("{} serves {} models — pick one in Config, there is no "
+                      "sensible default".format(url, len(ids)))
+    with _model_lock:
+        _model_cache[url] = ids[0]
+    return ids[0], None
 
 
 def build_user_message(goal, mode, work_type, references, constraints, boundaries, harness):
@@ -566,6 +709,16 @@ def sanitize_overrides(raw):
             ov["enable_thinking"] = _THINK_WORDS[str(think).strip().lower()]
         else:
             return None, "enable_thinking must be true or false"
+
+    # The caller's own key for the endpoint it named. Never logged, never
+    # persisted, never echoed back by /api/config — it exists for the length of
+    # one request. Length-capped like every other free-text field so a runaway
+    # paste fails at the door.
+    api_key = (raw.get("api_key") or "").strip()
+    if api_key:
+        if len(api_key) > 500:
+            return None, "api_key is too long"
+        ov["api_key"] = api_key
     return ov, None
 
 
@@ -573,23 +726,32 @@ def config_info():
     """Server defaults for the config page, plus what the endpoint reports.
 
     The UI merges this with its own localStorage. Never includes a key value —
-    only whether one is set."""
+    only whether one is set, per provider, so the browser can say "already set
+    on the server" without ever being handed the secret."""
     served, err = [], None
     try:
-        req = urllib.request.Request(models_url(), headers=_headers())
-        with urllib.request.urlopen(req, timeout=6) as r:
-            data = json.loads(r.read())
-        served = [m.get("id") for m in (data.get("data") or [])
-                  if isinstance(m, dict) and m.get("id")]
+        served, err = list_models(timeout=6)
     except Exception as e:  # noqa: BLE001 — the config page must render offline
         err = "{}: {}".format(type(e).__name__, e)
+    # The local entry's address is this server's own; the rest are fixed.
+    provs = []
+    for p in PROVIDERS:
+        url = p["url"] or VLLM_URL
+        # Deliberately NOT the env var's name: it contains the substring the
+        # no-key-leak guard scans for, and a name the README already documents
+        # buys the UI nothing that `key_on_server` does not.
+        provs.append({"id": p["id"], "label": p["label"], "url": url,
+                      "catalogue": p["catalogue"],
+                      "key_on_server": bool(resolve_key(url))})
     return {"version": VERSION,
             "defaults": {"vllm_url": VLLM_URL,
-                         "model": MODEL_ENV or _model_cache["id"] or "",
+                         "model": MODEL_ENV or _model_cache.get(models_url()) or "",
                          "temperature": TEMPERATURE,
                          "max_tokens": MAX_TOKENS,
                          "timeout": TIMEOUT,
-                         "enable_thinking": ENABLE_THINKING},
+                         "enable_thinking": ENABLE_THINKING,
+                         "provider": provider_for(VLLM_URL)},
+            "providers": provs,
             "model_pinned_by_env": bool(MODEL_ENV),
             "api_key_set": bool(API_KEY),
             "served_models": served,
@@ -605,13 +767,10 @@ def open_vllm(user_msg, stream, system_prompt=SYSTEM_PROMPT, ov=None):
     hunt at 2am. system_prompt defaults to the generator; /api/draft passes
     DRAFT_PROMPT through the same plumbing."""
     ov = ov or {}
-    url = ov.get("vllm_url") or VLLM_URL
-    if ov.get("model"):
-        model = ov["model"]
-    else:
-        model, err = resolve_model()
-        if err:
-            return None, err
+    url = chat_url(ov)
+    model, err = resolve_model(ov=ov)
+    if err:
+        return None, err
     payload = {"model": model,
                "messages": [{"role": "system", "content": system_prompt},
                             {"role": "user", "content": user_msg}],
@@ -627,7 +786,8 @@ def open_vllm(user_msg, stream, system_prompt=SYSTEM_PROMPT, ov=None):
     timeout = ov.get("timeout", TIMEOUT)
     retried = False
     while True:
-        req = urllib.request.Request(url, json.dumps(payload).encode(), _headers())
+        req = urllib.request.Request(url, json.dumps(payload).encode(),
+                                     _headers(ov, url))
         try:
             return urllib.request.urlopen(req, timeout=timeout), None
         except urllib.error.HTTPError as e:
@@ -641,7 +801,7 @@ def open_vllm(user_msg, stream, system_prompt=SYSTEM_PROMPT, ov=None):
             # give up honestly rather than looping.
             if e.code == 404 and not MODEL_ENV and not ov.get("model") and not retried:
                 retried = True
-                model, rerr = resolve_model(force=True)
+                model, rerr = resolve_model(force=True, ov=ov)
                 if model:
                     payload["model"] = model
                     continue
@@ -1266,18 +1426,26 @@ def version_info():
     """The /api/version payload. The reachability probe is deliberately short
     (3s): this endpoint feeds the UI footer and the healthcheck, and neither
     should hang for minutes because the Spark is off."""
-    info = {"version": VERSION, "model": MODEL_ENV or _model_cache["id"],
+    # Always the server's OWN endpoint, never a caller's override: this feeds
+    # the footer and the container healthcheck, both of which ask "is the box
+    # this server was configured for alive".
+    murl = models_url()
+    info = {"version": VERSION, "model": MODEL_ENV or _model_cache.get(murl),
             "vllm_url": VLLM_URL, "vllm_reachable": False}
     try:
-        req = urllib.request.Request(models_url(), headers=_headers())
+        req = urllib.request.Request(murl, headers=_headers())
         with urllib.request.urlopen(req, timeout=3) as r:
             data = json.loads(r.read())
         info["vllm_reachable"] = True
         if not info["model"]:
             ids = [m.get("id") for m in (data.get("data") or []) if isinstance(m, dict)]
-            if ids and ids[0]:
+            # Only cache a single-model answer — the same rule resolve_model
+            # follows, so a catalogue endpoint cannot seed the cache with
+            # whichever model happened to sort first.
+            if len(ids) == 1 and ids[0]:
                 with _model_lock:
-                    _model_cache["id"] = ids[0]  # free discovery — keep it
+                    _model_cache[murl] = ids[0]  # free discovery — keep it
+            if ids and ids[0]:
                 info["model"] = ids[0]
     except Exception:  # noqa: BLE001 — never crash the version endpoint
         pass
@@ -1322,6 +1490,15 @@ textarea:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
 .field{flex:1;min-width:180px}
 .modehint{flex:2;min-width:230px;align-self:center}
 .field label{display:block;font-size:12.5px;color:var(--muted);margin-bottom:4px}
+/* The config panel mounts once per tab, so its controls live INSIDE their
+   label: two live copies of a field cannot share an id, and a wrapping label
+   needs none to associate. Restore the spacing and the normal control colour
+   that the sibling layout got for free. */
+.cfgbox .field label>input,.cfgbox .field label>select{display:block;width:100%;
+  margin-top:4px;border:1px solid var(--line);border-radius:10px;padding:10px 12px;
+  font:inherit;font-size:14px;background:var(--bg);color:var(--ink)}
+.cfgbox .field label>input:focus{outline:2px solid var(--accent);outline-offset:-1px}
+.cfgbox{margin-top:14px}
 select{width:100%;border:1px solid var(--line);border-radius:10px;padding:10px 12px;
   font:inherit;background:var(--bg);color:var(--ink)}
 button{border:0;border-radius:10px;padding:10px 18px;font:inherit;font-weight:650;
@@ -1410,7 +1587,7 @@ footer a:hover{text-decoration:underline}
          max-length description plus the prefix can never 400 on /api/draft -->
     <textarea id="desc" autofocus maxlength="3935" placeholder="i want to analyze this platform located here XXXXX and i want you to improve it. I need it to run faster"></textarea>
     <div class="row">
-      <div class="field"><label for="dharness">Target harness</label><select id="dharness">
+      <div class="field"><label for="dharness">Target harness <span class="opt">— who <i>runs</i> the prompt</span></label><select id="dharness">
         <optgroup label="Agentic CLIs"><option>Claude Code</option><option>Codex</option>
           <option>Gemini CLI</option><option>opencode</option>
           <option>Antigravity</option></optgroup>
@@ -1433,39 +1610,7 @@ footer a:hover{text-decoration:underline}
       <button id="dselftest" class="ghost">Run self-test</button>
       <span class="hint" id="dselftestout">Runs both unit suites and a served-JS check before you spend a run.</span>
     </div>
-    <details id="cfgbox">
-      <summary>&#9881; Config — which model writes your prompts</summary>
-      <p class="hint">Stored in this browser only; the server keeps nothing. Sent with each
-      request as an override. Blank means "use the server default". This is a LAN tool —
-      see the threat model before exposing it beyond your own network.</p>
-      <div class="row">
-        <div class="field"><label for="cfgurl">Endpoint URL</label>
-          <input id="cfgurl" placeholder="server default"></div>
-        <div class="field"><label for="cfgmodel">Model</label>
-          <select id="cfgmodel"><option value="">server default (auto-discover)</option></select></div>
-      </div>
-      <div class="row">
-        <div class="field"><label for="cfgtemp">Temperature</label>
-          <input id="cfgtemp" type="number" step="0.05" min="0" max="2" placeholder="default"></div>
-        <div class="field"><label for="cfgmax">Max tokens</label>
-          <input id="cfgmax" type="number" min="1" max="200000" placeholder="default"></div>
-        <div class="field"><label for="cfgtimeout">Timeout (s)</label>
-          <input id="cfgtimeout" type="number" min="5" max="3600" placeholder="default"></div>
-        <div class="field"><label for="cfgthink">Thinking</label>
-          <select id="cfgthink"><option value="">server default</option>
-            <option value="true">on</option>
-            <option value="false">off</option></select></div>
-      </div>
-      <p class="hint">A reasoning model can spend its whole token budget thinking and
-      never write an answer. Thinking off answers the same brief far faster and far
-      cheaper; leave it on when you want the model to work the problem harder.</p>
-      <div class="row">
-        <button id="cfgsave" class="ghost">Save</button>
-        <button id="cfgclear" class="ghost">Reset to server defaults</button>
-        <button id="cfgrefresh" class="ghost">Reload model list</button>
-        <span class="hint" id="cfgout"></span>
-      </div>
-    </details>
+    <div class="cfgslot"></div>
     <div class="row">
       <button id="draftgo">Draft the form &#8594;</button>
       <span class="hint" id="drafthint" hidden><span class="spin"></span> drafting&#8230;</span>
@@ -1493,7 +1638,7 @@ footer a:hover{text-decoration:underline}
       <option value="">Auto</option><option>Game</option><option>Website or app</option>
       <option>Writing</option><option>Backend or code</option><option>Design</option>
       <option>Marketing</option><option>Research</option><option>Other</option></select></div>
-    <div class="field"><label for="harness">Target harness</label><select id="harness">
+    <div class="field"><label for="harness">Target harness <span class="opt">— who <i>runs</i> the prompt</span></label><select id="harness">
       <optgroup label="Agentic CLIs"><option>Claude Code</option><option>Codex</option>
         <option>Gemini CLI</option><option>opencode</option>
         <option>Antigravity</option></optgroup>
@@ -1517,6 +1662,7 @@ footer a:hover{text-decoration:underline}
   <textarea id="cons" class="short" placeholder="e.g. Three.js only; must run in a phone browser; no external assets"></textarea>
   <label class="lbl" for="bounds">Hard boundaries (never cross) <span class="opt">optional</span></label>
   <textarea id="bounds" class="short" placeholder="e.g. local only — no deploys, no domains, nothing live; don't touch prod; no paid APIs"></textarea>
+  <div class="cfgslot"></div>
   <p class="hint" id="selftestout" hidden></p>
   <div class="row">
     <button id="go">Generate</button>
@@ -1876,17 +2022,71 @@ async function runSelfTest(){
    docs/config-design-v030.md). Config lives in localStorage and travels as an
    `overrides` object on each POST; the server range-checks every field. A
    consequence, accepted in the design: config follows the browser, so a phone
-   and a laptop can differ. */
+   and a laptop can differ.
+
+   The panel is mounted into every .cfgslot — one on each tab — because the
+   model that WRITES your prompt is a different choice from the harness that
+   RUNS it, and you need the first one wherever you happen to be standing.
+   Fields are addressed by data-cfg, never by id: two live copies of the same
+   control cannot both own an id, and every write goes to all copies. */
 const CFG_KEY='gauntletx.config.v1';
-const CFG_FIELDS={cfgurl:'vllm_url',cfgmodel:'model',cfgtemp:'temperature',
-                  cfgmax:'max_tokens',cfgtimeout:'timeout',
-                  cfgthink:'enable_thinking'};
+const CFG_NAMES=['provider','vllm_url','model','api_key','temperature',
+                 'max_tokens','timeout','enable_thinking'];
+/* Filled from /api/config; the local entry's URL is whatever this server uses. */
+let CFG_PROVIDERS=[];
+
+function cfgPanelHTML(){
+  return '<details class="cfgbox"><summary>&#9881; Config — which model writes your prompts</summary>'
+   +'<p class="hint">Stored in this browser only; the server keeps nothing. Sent with each '
+   +'request as an override. Blank means "use the server default". This is a LAN tool — '
+   +'see the threat model before exposing it beyond your own network.</p>'
+   +'<div class="row">'
+   +'<div class="field"><label>Provider<select data-cfg="provider">'
+   +'<option value="">server default</option></select></label></div>'
+   +'<div class="field"><label>Endpoint URL<input data-cfg="vllm_url" placeholder="server default"></label></div>'
+   +'</div>'
+   +'<div class="row">'
+   +'<div class="field"><label>Model<input data-cfg="model" list="cfgmodellist" '
+   +'placeholder="server default (auto-discover)" autocomplete="off"></label></div>'
+   +'<div class="field"><label>API key<input data-cfg="api_key" type="password" '
+   +'autocomplete="off" placeholder="none needed"></label></div>'
+   +'</div>'
+   +'<div class="row">'
+   +'<div class="field"><label>Temperature<input data-cfg="temperature" type="number" step="0.05" min="0" max="2" placeholder="default"></label></div>'
+   +'<div class="field"><label>Max tokens<input data-cfg="max_tokens" type="number" min="1" max="200000" placeholder="default"></label></div>'
+   +'<div class="field"><label>Timeout (s)<input data-cfg="timeout" type="number" min="5" max="3600" placeholder="default"></label></div>'
+   +'<div class="field"><label>Thinking<select data-cfg="enable_thinking">'
+   +'<option value="">server default</option><option value="true">on</option>'
+   +'<option value="false">off</option></select></label></div>'
+   +'</div>'
+   +'<p class="hint">A reasoning model can spend its whole token budget thinking and '
+   +'never write an answer. Thinking off answers the same brief far faster and far '
+   +'cheaper; leave it on when you want the model to work the problem harder.</p>'
+   +'<div class="row">'
+   +'<button class="ghost" data-cfgact="save">Save</button>'
+   +'<button class="ghost" data-cfgact="clear">Reset to server defaults</button>'
+   +'<button class="ghost" data-cfgact="refresh">Reload model list</button>'
+   +'<span class="hint" data-cfgout></span></div></details>';
+}
+
+function cfgEls(name){
+  return Array.from(document.querySelectorAll('[data-cfg="'+name+'"]'));
+}
+function cfgVal(name){
+  const e=cfgEls(name)[0];return e?(e.value||'').trim():'';
+}
+function cfgSay(msg){
+  document.querySelectorAll('[data-cfgout]').forEach(e=>{e.textContent=msg});
+}
 function cfgRead(){
   try{return JSON.parse(localStorage.getItem(CFG_KEY)||'{}')}catch(e){return {}}
 }
 function cfgOverrides(){
   const c=cfgRead(),o={};
-  for(const k of Object.values(CFG_FIELDS)){
+  /* `provider` is a UI convenience for filling the endpoint — the server is
+     told the URL, never the label, so a renamed preset can't change routing. */
+  for(const k of CFG_NAMES){
+    if(k==='provider')continue;
     const v=c[k];
     if(v!==undefined&&v!==null&&String(v).trim()!=='')o[k]=v;
   }
@@ -1894,57 +2094,133 @@ function cfgOverrides(){
 }
 function cfgToForm(){
   const c=cfgRead();
-  for(const [id,key] of Object.entries(CFG_FIELDS)){
-    const e=$(id);if(e)e.value=(c[key]===undefined||c[key]===null)?'':c[key];
+  for(const k of CFG_NAMES){
+    const v=(c[k]===undefined||c[k]===null)?'':c[k];
+    cfgEls(k).forEach(e=>{e.value=v});
   }
+  cfgSyncProviderUI();
+}
+/* Picking a provider fills the endpoint and says whether a key is already on
+   the server. Custom leaves the URL alone — that is the whole point of it. */
+function cfgSyncProviderUI(){
+  const pid=cfgVal('provider');
+  const p=CFG_PROVIDERS.filter(x=>x.id===pid)[0];
+  const keyEls=cfgEls('api_key');
+  if(!p){
+    keyEls.forEach(e=>{e.placeholder=pid==='custom'?'paste a key if this endpoint needs one'
+                                                   :'none needed'});
+    return;
+  }
+  keyEls.forEach(e=>{
+    e.placeholder=p.key_on_server?'set on server — leave blank to use it'
+                                 :(p.id==='local'?'none needed':'paste your key');
+  });
 }
 async function cfgLoadServer(){
   try{
     const r=await fetch('/api/config');const j=await r.json();
-    const sel=$('cfgmodel');if(!sel)return;
-    const cur=cfgRead().model||'';
-    sel.innerHTML='<option value="">server default (auto-discover)</option>';
-    (j.served_models||[]).forEach(m=>{
-      const o=document.createElement('option');o.value=m;o.textContent=m;sel.appendChild(o)});
-    if(cur&&!(j.served_models||[]).includes(cur)){
-      const o=document.createElement('option');o.value=cur;
-      o.textContent=cur+' (not currently served)';sel.appendChild(o)}
-    sel.value=cur;
+    CFG_PROVIDERS=(j.providers||[]);
+    const cur=cfgRead();
+    cfgEls('provider').forEach(sel=>{
+      sel.innerHTML='<option value="">server default</option>';
+      CFG_PROVIDERS.forEach(p=>{
+        const o=document.createElement('option');o.value=p.id;
+        o.textContent=p.label+(p.key_on_server?' · key on server':'');
+        sel.appendChild(o)});
+      const o=document.createElement('option');o.value='custom';
+      o.textContent='Custom endpoint';sel.appendChild(o);
+      sel.value=cur.provider||'';
+    });
     const d=j.defaults||{};
-    $('cfgurl').placeholder=d.vllm_url||'server default';
-    $('cfgtemp').placeholder=d.temperature;
-    $('cfgmax').placeholder=d.max_tokens;
-    $('cfgtimeout').placeholder=d.timeout;
-    /* a select has no placeholder — say what "server default" resolves to */
-    const th=$('cfgthink');
-    if(th&&th.options.length){
-      th.options[0].textContent='server default'+
+    cfgEls('vllm_url').forEach(e=>{e.placeholder=d.vllm_url||'server default'});
+    cfgEls('temperature').forEach(e=>{e.placeholder=d.temperature});
+    cfgEls('max_tokens').forEach(e=>{e.placeholder=d.max_tokens});
+    cfgEls('timeout').forEach(e=>{e.placeholder=d.timeout});
+    cfgEls('enable_thinking').forEach(e=>{
+      if(e.options.length)e.options[0].textContent='server default'+
         (d.enable_thinking===true?' (on)':d.enable_thinking===false?' (off)':'');
-    }
+    });
+    cfgSyncProviderUI();
     const bits=[];
     if(j.discovery_error)bits.push('endpoint unreachable — '+j.discovery_error);
     else bits.push((j.served_models||[]).length+' model(s) served');
     if(j.model_pinned_by_env)bits.push('server pins GAUNTLETX_MODEL');
-    $('cfgout').textContent=bits.join(' · ');
-  }catch(e){$('cfgout').textContent='could not load server config: '+e.message}
+    cfgSay(bits.join(' · '));
+    cfgFillModels(j.served_models||[]);
+  }catch(e){cfgSay('could not load server config: '+e.message)}
 }
-if($('cfgsave')){
-  $('cfgsave').addEventListener('click',()=>{
-    const c={};
-    for(const [id,key] of Object.entries(CFG_FIELDS)){
-      const v=($(id).value||'').trim();if(v!=='')c[key]=v}
-    localStorage.setItem(CFG_KEY,JSON.stringify(c));
-    const n=Object.keys(c).length;
-    $('cfgout').textContent=n?('saved — '+n+' override(s) active in this browser')
-                             :'saved — using server defaults';
+/* One shared <datalist> feeds the model input on both tabs. */
+function cfgFillModels(ids){
+  const dl=$('cfgmodellist');if(!dl)return;
+  dl.innerHTML='';
+  ids.forEach(m=>{const o=document.createElement('option');o.value=m;dl.appendChild(o)});
+}
+/* Ask the endpoint the browser is actually pointed at — not the server's own.
+   POST, never a query string: an API key in a URL lands in every access log
+   between here and there. */
+async function cfgReloadModels(){
+  cfgSay('loading models…');
+  try{
+    const body={vllm_url:cfgVal('vllm_url'),api_key:cfgVal('api_key')};
+    const r=await fetch('/api/models',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const j=await r.json();
+    if(j.error){cfgSay('could not list models from '+(j.url||'the endpoint')+' — '+j.error);return}
+    cfgFillModels(j.models||[]);
+    const n=(j.models||[]).length;
+    cfgSay(n+' model(s) at '+(j.url||'the endpoint')+
+           (n>1?' — type to filter, then pick one':''));
+  }catch(e){cfgSay('could not list models: '+e.message)}
+}
+function cfgSave(){
+  const c={};
+  for(const k of CFG_NAMES){const v=cfgVal(k);if(v!=='')c[k]=v}
+  localStorage.setItem(CFG_KEY,JSON.stringify(c));
+  /* api_key is counted but never named back at the user. */
+  const n=Object.keys(c).length;
+  cfgSay(n?('saved — '+n+' override(s) active in this browser'):'saved — using server defaults');
+}
+function mountConfig(){
+  const slots=document.querySelectorAll('.cfgslot');
+  if(!slots.length)return;
+  slots.forEach(s=>{s.innerHTML=cfgPanelHTML()});
+  if(!$('cfgmodellist')){
+    const dl=document.createElement('datalist');dl.id='cfgmodellist';
+    document.body.appendChild(dl);
+  }
+  /* Delegated so both copies are wired by one listener, and so a panel added
+     later still works. Typing in one copy mirrors into its twin immediately —
+     two panels that disagree would be worse than one. */
+  document.addEventListener('input',e=>{
+    const t=e.target,name=t&&t.getAttribute&&t.getAttribute('data-cfg');
+    if(!name)return;
+    cfgEls(name).forEach(o=>{if(o!==t)o.value=t.value});
   });
-  $('cfgclear').addEventListener('click',()=>{
-    localStorage.removeItem(CFG_KEY);cfgToForm();
-    $('cfgout').textContent='cleared — using server defaults';cfgLoadServer();
+  document.addEventListener('change',e=>{
+    const t=e.target,name=t&&t.getAttribute&&t.getAttribute('data-cfg');
+    if(!name)return;
+    cfgEls(name).forEach(o=>{if(o!==t)o.value=t.value});
+    if(name!=='provider')return;
+    const p=CFG_PROVIDERS.filter(x=>x.id===t.value)[0];
+    if(p)cfgEls('vllm_url').forEach(o=>{o.value=p.url||''});
+    else if(t.value==='')cfgEls('vllm_url').forEach(o=>{o.value=''});
+    cfgSyncProviderUI();
+    if(t.value)cfgReloadModels();
   });
-  $('cfgrefresh').addEventListener('click',cfgLoadServer);
+  document.addEventListener('click',e=>{
+    const t=e.target,act=t&&t.getAttribute&&t.getAttribute('data-cfgact');
+    if(!act)return;
+    e.preventDefault();
+    if(act==='save')cfgSave();
+    else if(act==='clear'){
+      localStorage.removeItem(CFG_KEY);cfgToForm();
+      cfgSay('cleared — using server defaults');cfgLoadServer();
+    }
+    else if(act==='refresh')cfgReloadModels();
+  });
   cfgToForm();cfgLoadServer();
 }
+mountConfig();
 $('baseline').addEventListener('change',()=>{baselineTouched=true;$('dbaseline').checked=$('baseline').checked});
 $('dbaseline').addEventListener('change',()=>{baselineTouched=true;$('baseline').checked=$('dbaseline').checked});
 $('statuspage').addEventListener('change',()=>{$('dstatuspage').checked=$('statuspage').checked});
@@ -2172,7 +2448,29 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if route == "/api/draft":
             self._draft()
             return
+        if route == "/api/models":
+            self._models()
+            return
         self._json({"error": "not found"}, 404)
+
+    def _models(self):
+        """POST /api/models — the catalogue at an arbitrary endpoint.
+
+        A POST and not a query string on /api/config for one reason: an API key
+        must never ride in a URL, where it lands in access logs, proxy logs and
+        browser history. Body only.
+
+        Returns ids, never anything derived from the key."""
+        p = self._read_json_body()
+        if p is None:
+            return
+        ov, err = sanitize_overrides(p)
+        if err:
+            self._json({"error": err}, 400)
+            return
+        ids, derr = list_models(ov, timeout=15)
+        self._json({"url": models_url(ov), "models": ids,
+                    "provider": provider_for(chat_url(ov)), "error": derr})
 
     def _read_json_body(self):
         """The request body as a dict, or None with the 400 already written.

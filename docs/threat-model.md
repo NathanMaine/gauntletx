@@ -41,6 +41,38 @@ browser localStorage. An API key entered in the UI travels per-request over LAN 
 env-var route is the recommended one for container deployment, and the config page says
 so at the point of entry.
 
+## Provider keys, and why they are bound to a host
+
+Adding hosted providers (0.3.8) put a real secret next to a user-controlled URL for the
+first time, and those two features combine badly by default.
+
+The naive implementation attaches whatever key the server holds to whatever endpoint the
+request names. Because the endpoint is deliberately overridable — see above — that turns
+the config page into a key-exfiltration tool: anyone who can reach the port points
+gauntletx at a box they control, and the server posts the key to them with the very first
+request. No warning, no log, nothing on screen to notice.
+
+So a **stored** key is bound to its provider's host and resolved *from the URL being
+called*, never from ambient state:
+
+1. a key supplied in the request wins — the caller already had it;
+2. otherwise, a server-side key is used **only** if the endpoint's host is the host that
+   key was configured for;
+3. otherwise no `Authorization` header is sent at all.
+
+A custom endpoint therefore never receives a stored key, and can still authenticate using
+one typed into the config panel — where the person supplying it is the person who owns it.
+
+This does not make key handling airtight, and under this posture it does not need to be: a
+key in browser localStorage is readable by anyone with that browser profile, and a key
+crossing a LAN over plain HTTP is readable by anyone already positioned to read your LAN
+traffic. Both are consistent with "everyone who can reach the port is trusted". What the
+host binding removes is the case where *reaching the port* is enough to *take the key
+somewhere else* — a meaningfully worse outcome than reading traffic you already control.
+
+`resolve_key` carries these rules, and `test_logic.py` asserts them, including the case
+that matters most: overriding the URL to an unknown host yields no key.
+
 ## What would have to change to expose this publicly
 
 Not a recommendation — a list of what is deliberately absent, so nobody assumes it is

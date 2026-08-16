@@ -24,6 +24,7 @@ Run:  python3 test_logic.py        (exit 0 and "N/N" on success)
 import io
 import json
 import sys
+import urllib.error
 
 import gauntletx as G
 
@@ -365,6 +366,149 @@ for sent, want in (("false", False), ("true", True), ("off", False), ("on", True
 ov, err = G.sanitize_overrides({"enable_thinking": "sometimes"})
 check("enable_thinking rejects junk", ov, None)
 check_true("enable_thinking junk explains itself", "true or false" in (err or ""))
+
+# ------------------------------- v0.3.8: providers, and where a key may travel
+#
+# resolve_key is the security-critical function in this file. The endpoint is
+# overridable by design, so the rule that a STORED key only ever goes to the
+# host it belongs to is what stops gauntletx being a key-exfiltration tool.
+
+_SAVED = (G.API_KEY, G.VLLM_URL, dict(G._KEY_BY_HOST))
+G.API_KEY = "server-generic-key"
+G.VLLM_URL = "http://10.9.9.9:8000/v1/chat/completions"
+G._KEY_BY_HOST = {"openrouter.ai": "sk-or-stored",
+                  "api.deepseek.com": "sk-ds-stored"}
+try:
+    OR = "https://openrouter.ai/api/v1/chat/completions"
+    EVIL = "http://attacker.example.com:9000/v1/chat/completions"
+
+    check("resolve_key: browser key wins over stored",
+          G.resolve_key(OR, {"api_key": "sk-from-browser"}), "sk-from-browser")
+    check("resolve_key: provider host gets its stored key",
+          G.resolve_key(OR), "sk-or-stored")
+    check("resolve_key: a second provider gets its own key",
+          G.resolve_key("https://api.deepseek.com/v1/chat/completions"), "sk-ds-stored")
+    check("resolve_key: the server's own endpoint gets the generic key",
+          G.resolve_key(G.VLLM_URL), "server-generic-key")
+
+    # The one that matters. Every stored key must stay home.
+    check("resolve_key: a custom host gets NO stored key", G.resolve_key(EVIL), "")
+    check("resolve_key: overriding the URL cannot drag a key along",
+          G.resolve_key(EVIL, {"vllm_url": EVIL}), "")
+    check("resolve_key: a caller may still use its OWN key on a custom host",
+          G.resolve_key(EVIL, {"api_key": "mine"}), "mine")
+    check("resolve_key: junk URL yields no key", G.resolve_key("not a url"), "")
+    check("resolve_key: empty URL yields no key", G.resolve_key(""), "")
+
+    check_true("_headers: no Authorization for a custom host",
+               "Authorization" not in G._headers({"vllm_url": EVIL}))
+    check("_headers: Authorization for a known provider",
+          G._headers({"vllm_url": OR}).get("Authorization"), "Bearer sk-or-stored")
+
+    check("provider_for: known provider host", G.provider_for(OR), "openrouter")
+    check("provider_for: the server's endpoint is local",
+          G.provider_for(G.VLLM_URL), "local")
+    check("provider_for: anything else is custom", G.provider_for(EVIL), "custom")
+
+    # config_info must expose whether a key exists, never the key itself.
+    ci = G.config_info()
+    provs = {p["id"]: p for p in ci["providers"]}
+    check("config_info lists every provider", len(provs), len(G.PROVIDERS))
+    check("config_info: openrouter key_on_server is a bool True",
+          provs["openrouter"]["key_on_server"], True)
+    check("config_info: qwen has no key configured",
+          provs["qwen"]["key_on_server"], False)
+    blob = json.dumps(ci)
+    for secret in ("sk-or-stored", "sk-ds-stored", "server-generic-key"):
+        check_true("config_info never serialises " + secret, secret not in blob)
+finally:
+    G.API_KEY, G.VLLM_URL, G._KEY_BY_HOST = _SAVED[0], _SAVED[1], _SAVED[2]
+
+# models_url must follow the override — reading the global was the bug that
+# made the config page list the local box's model while pointed elsewhere.
+check("models_url derives from the override",
+      G.models_url({"vllm_url": "https://api.deepseek.com/v1/chat/completions"}),
+      "https://api.deepseek.com/v1/models")
+check("models_url handles a base URL without /chat/completions",
+      G.models_url({"vllm_url": "https://x.test/v1/"}), "https://x.test/v1/models")
+check("chat_url falls back to the server default", G.chat_url({}), G.VLLM_URL)
+check("chat_url prefers the override",
+      G.chat_url({"vllm_url": "https://x.test/v1/chat/completions"}),
+      "https://x.test/v1/chat/completions")
+
+# The discovery cache is keyed per endpoint. One global slot would let a
+# catalogue provider's answer be handed to the local box.
+_saved_cache = dict(G._model_cache)
+G._model_cache.clear()
+G._model_cache["https://a.test/v1/models"] = "model-a"
+G._model_cache["https://b.test/v1/models"] = "model-b"
+check("model cache: endpoint A keeps its own answer",
+      G.resolve_model(ov={"vllm_url": "https://a.test/v1/chat/completions"}),
+      ("model-a", None))
+check("model cache: endpoint B is not contaminated by A",
+      G.resolve_model(ov={"vllm_url": "https://b.test/v1/chat/completions"}),
+      ("model-b", None))
+check("resolve_model: an explicit model skips discovery entirely",
+      G.resolve_model(ov={"vllm_url": "https://unreachable.invalid/v1/chat/completions",
+                          "model": "chosen/one"}), ("chosen/one", None))
+G._model_cache.clear()
+G._model_cache.update(_saved_cache)
+
+# An env pin describes the box this server was configured for; it must not
+# follow the request to a provider that never heard of that name.
+_saved_env = G.MODEL_ENV
+G.MODEL_ENV = "local-only-pin"
+try:
+    check("resolve_model: env pin applies to the server's own endpoint",
+          G.resolve_model(), ("local-only-pin", None))
+    mid, merr = G.resolve_model(ov={"vllm_url": "https://openrouter.ai/api/v1/chat/completions",
+                                    "model": "anthropic/claude-sonnet-4.5"})
+    check("resolve_model: an override beats the env pin", mid, "anthropic/claude-sonnet-4.5")
+finally:
+    G.MODEL_ENV = _saved_env
+
+ov, err = G.sanitize_overrides({"api_key": "  sk-test-123  "})
+check("api_key is accepted and trimmed", (ov.get("api_key"), err), ("sk-test-123", None))
+ov, err = G.sanitize_overrides({"api_key": ""})
+check("empty api_key stays absent", "api_key" in ov, False)
+ov, err = G.sanitize_overrides({"api_key": "x" * 501})
+check("over-long api_key is rejected", ov, None)
+
+# The two failures HTTPS providers introduce that a local vLLM never produced.
+# Both are opaque verbatim, so the message has to name the fix.
+_cert = G._endpoint_error(
+    urllib.error.URLError("[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed"),
+    "https://openrouter.ai/api/v1/models")
+check_true("cert failure names the missing CA bundle", "CA bundle" in _cert)
+check_true("cert failure names the fix", "ca-certificates" in _cert)
+
+_401 = G._endpoint_error(
+    urllib.error.HTTPError("https://api.deepseek.com/v1/models", 401, "Unauthorized", {}, None),
+    "https://api.deepseek.com/v1/models")
+check_true("401 is named as a credentials problem", "credentials" in _401)
+check_true("401 names the host that rejected them", "api.deepseek.com" in _401)
+check_true("401 points at where to set a key", "Config" in _401)
+
+_plain = G._endpoint_error(OSError("connection refused"), "http://127.0.0.1:1/v1/models")
+check_true("an ordinary error is passed through unembellished",
+           "connection refused" in _plain and "CA bundle" not in _plain)
+
+# version_info feeds the UI footer AND the container healthcheck, so it must
+# never raise. Keying _model_cache per URL turned its old _model_cache["id"]
+# into a KeyError and 500'd the endpoint the healthcheck polls — caught in a
+# browser, not by this suite, which is why the shape is now asserted here.
+# Port 1 on loopback refuses instantly, so the probe costs nothing.
+_saved_url = G.VLLM_URL
+G.VLLM_URL = "http://127.0.0.1:1/v1/chat/completions"
+try:
+    vi = G.version_info()
+    for k in ("version", "model", "vllm_url", "vllm_reachable"):
+        check_true("version_info has " + k, k in vi)
+    check("version_info reports an unreachable endpoint", vi["vllm_reachable"], False)
+except Exception as e:  # pragma: no cover
+    check("version_info raised: " + type(e).__name__, False, True)
+finally:
+    G.VLLM_URL = _saved_url
 
 # --------------------------------------------------------- SectionStream
 buf = io.StringIO()

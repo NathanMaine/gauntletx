@@ -22,6 +22,9 @@ resolution. Four have long-form write-ups in this directory.
 | [#15](https://github.com/NathanMaine/gauntletx/issues/15) | BASELINE_CONTRACT was satisfied by a baseline that was computed wrong | 0.3.6 |
 | 16 † | A working generation reported as "the model returned no output": token budget half what a reasoning model needed, thinking pane blanked by an upstream field rename, truncation indistinguishable from success | 0.3.7 |
 
+| 17 † | Config overrides were half-wired: the model list and credentials came from the server's globals, so pointing the config page at another provider still queried the local box | 0.3.8 |
+| 18 † | Discovery took `data[0]` from any endpoint — correct for a one-model vLLM, a coin toss on a 413-model catalogue | 0.3.8 |
+
 † No GitHub issue filed — found and fixed in one session.
 
 ## Long-form write-ups

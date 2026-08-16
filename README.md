@@ -362,7 +362,10 @@ All optional — every one has a working default. See [.env.example](.env.exampl
 | `GAUNTLETX_MAX_TOKENS` | `32768` | Completion budget. A reasoning model spends most of it thinking — measured at ~15k tokens for one generation — and a budget that runs out mid-thought returns nothing at all. |
 | `GAUNTLETX_TIMEOUT` | `1800` | Seconds per vLLM call. Raise this with `MAX_TOKENS`, never alone: a 15k-token run takes ~11 minutes, so a short timeout turns a working generation into a failure. |
 | `GAUNTLETX_ENABLE_THINKING` | *(unset)* | `true` / `false`. Unset sends no `chat_template_kwargs` and lets the model's chat template decide. `false` answers the same brief ~13x cheaper and ~24x faster, at the cost of the model reasoning it through first. Per-browser override in the Config panel. |
-| `GAUNTLETX_API_KEY` | *(unset)* | Sent as `Authorization: Bearer` when set — only for a vLLM behind an authenticating proxy. Unset, no header is sent. |
+| `GAUNTLETX_API_KEY` | *(unset)* | Sent as `Authorization: Bearer` when set — only for a vLLM behind an authenticating proxy. Scoped to `GAUNTLETX_VLLM_URL`'s host. Unset, no header is sent. |
+| `GAUNTLETX_OPENROUTER_API_KEY` | *(unset)* | Key for the OpenRouter preset. Bound to `openrouter.ai` and sent nowhere else. |
+| `GAUNTLETX_DEEPSEEK_API_KEY` | *(unset)* | Key for the DeepSeek preset. Bound to `api.deepseek.com`. |
+| `GAUNTLETX_QWEN_API_KEY` | *(unset)* | Key for the Qwen (DashScope) preset. Bound to `dashscope-intl.aliyuncs.com`. |
 
 Port and host are CLI flags, not env vars: `--port 7332 --host 0.0.0.0`.
 
@@ -549,9 +552,40 @@ MIT — see [LICENSE](LICENSE).
 
 ### Config page
 
-A ⚙ panel at the bottom of the first tab picks the model that writes your prompts —
-endpoint, model, temperature, max tokens, timeout, thinking — with the model list
-populated from what your endpoint actually reports.
+A ⚙ panel on **both tabs** picks the model that writes your prompts — provider, endpoint,
+model, API key, temperature, max tokens, timeout, thinking — with the model list populated
+from what your endpoint actually reports. The two copies are the same settings: edit
+either one.
+
+**This is not the Target harness.** The harness is who *runs* the finished prompt; the
+Config panel is who *writes* it. You can have a local 27B write a prompt you paste into
+Claude Code, or have Claude Opus write one you paste into a local model.
+
+### Providers
+
+Local vLLM is the default and needs no key. Three hosted presets are built in — picking
+one fills the endpoint for you:
+
+| Provider | Notes |
+| --- | --- |
+| **Local vLLM** | Whatever `GAUNTLETX_VLLM_URL` points at. One model, auto-discovered. |
+| **OpenRouter** | 400+ models. Type to filter — `claude`, `deepseek`, `llama` — then pick. |
+| **DeepSeek** | `deepseek-chat`, `deepseek-reasoner`. |
+| **Qwen (DashScope)** | The international compatible-mode endpoint. |
+| **Custom endpoint** | Any other OpenAI-compatible URL. |
+
+Keys come from either the Config panel (per-browser, quickest on a trusted LAN) or the
+server env vars above (set once, every browser has it). The panel says *"set on server"*
+when an env key already covers the provider you picked.
+
+**A stored key is only ever sent to its own provider's host.** Overriding the endpoint to
+some other address does not drag it along — otherwise pointing gauntletx at a machine you
+don't control would post your secret to it. A custom endpoint can still authenticate with
+a key you type into the panel.
+
+There is no sensible default model on a 400-model endpoint, so gauntletx will not guess
+one: pick a model, or it tells you to. It auto-discovers only when the endpoint serves
+exactly one thing.
 
 Config is stored in **your browser**, not on the server: the container runs read-only, so
 settings travel as per-request overrides and the server range-checks each one. Config
